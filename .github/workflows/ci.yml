@@ -1,56 +1,16 @@
 name: Build Tweak
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          submodules: true
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            build-essential \
-            git \
-            perl \
-            libssl-dev \
-            curl \
-            wget \
-            zip \
-            xz-utils \
-            liblzma-dev
-
-      - name: Setup Theos
-        run: |
-          git clone --depth=1 https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-
-      - name: Setup SDK
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/theos/sdks
-          cd $GITHUB_WORKSPACE/theos/sdks
-          wget -q https://github.com/theos/sdks/releases/download/1.0/iPhoneOS15.2.sdk.tar.xz
-          tar -xf iPhoneOS15.2.sdk.tar.xz
-          echo "THEOS_SDK=iPhoneOS15.2.sdk" >> $GITHUB_ENV
-
-      - name: Build 34306jit
-        run: |
-          export THEOS=$GITHUB_WORKSPACE/theos
-          make clean
-          make package THEOS=$THEOS
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+          submodules: recursive
+      - uses: theos/github-action@main
         with:
-          name: 34306jit-Build
-          path: |
-            packages/*.deb
-            packages/*.ipa
-          retention-days: 7
+          sdk: iphoneos15.2
+          make-args: clean package
