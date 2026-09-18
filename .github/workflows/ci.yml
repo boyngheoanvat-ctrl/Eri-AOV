@@ -22,25 +22,24 @@ jobs:
       - name: Setup Theos
         run: |
           git clone --depth=1 --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
-          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-          echo "THEOS_MAKE_PATH=$GITHUB_WORKSPACE/theos/makefiles" >> $GITHUB_ENV
 
       - name: Download SDK
         run: |
-          mkdir -p $THEOS/sdks
-          cd $THEOS/sdks
+          mkdir -p $GITHUB_WORKSPACE/theos/sdks
+          cd $GITHUB_WORKSPACE/theos/sdks
           curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o sdks.zip
           unzip -q sdks.zip
           mv sdks-master/*.sdk ./
           rm -rf sdks-master sdks.zip
-          echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: Build — Đảm bảo THEOS được export
+      - name: Build — Export đủ biến
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          THEOS_MAKE_PATH: ${{ github.workspace }}/theos/makefiles
+          THEOS_SDK: iPhoneOS15.6.sdk
+          SDKVERSION: 15.6
         run: |
-          export THEOS=$GITHUB_WORKSPACE/theos
-          export THEOS_MAKE_PATH=$THEOS/makefiles
-          make clean
-          make package
+          make package THEOS=$THEOS THEOS_MAKE_PATH=$THEOS_MAKE_PATH SDKVERSION=$SDKVERSION
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
