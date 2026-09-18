@@ -186,12 +186,22 @@ static void* hack_thread(void*) {
 
 #pragma mark - Touch Input
 - (void)updateIO:(UIEvent *)e {
-    UITouch *t = e.allTouches.anyObject; if (!t) return;
+    NSSet *touches = e.allTouches;
+    UITouch *t = touches.anyObject; 
+    if (!t) return;
+    
     CGPoint p = [t locationInView:self.view];
     ImGuiIO& io = ImGui::GetIO();
     io.MousePos = ImVec2(p.x, p.y);
     io.MouseDown[0] = (t.phase != UITouchPhaseEnded && t.phase != UITouchPhaseCancelled);
+    
+    // === CHẠM 3 NGÓN TAY → BẬT/TẮT MENU ===
+    if (touches.count == 3 && t.phase == UITouchPhaseBegan) {
+        MenDeal = !MenDeal;
+        LOGI(@"Menu %@", MenDeal ? @"HIỆN" : @"ẨN");
+    }
 }
+
 - (void)touchesBegan:(NSSet *)t withEvent:(UIEvent *)e { [self updateIO:e]; }
 - (void)touchesMoved:(NSSet *)t withEvent:(UIEvent *)e { [self updateIO:e]; }
 - (void)touchesEnded:(NSSet *)t withEvent:(UIEvent *)e { [self updateIO:e]; }
@@ -203,7 +213,7 @@ static void* hack_thread(void*) {
     io.DisplaySize = ImVec2(kWidth, kHeight);
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
     io.DeltaTime = 1.0f/60.0f;
-    self.view.userInteractionEnabled = MenDeal;
+    self.view.userInteractionEnabled = YES;
 
     id<MTLCommandBuffer> cmd = [_cmdQueue commandBuffer];
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
@@ -213,6 +223,18 @@ static void* hack_thread(void*) {
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
+    // === NÚT DỰ PHÒNG HIỆN MENU ===
+    if (!MenDeal) {
+        ImGui::SetNextWindowPos(ImVec2(20, 20));
+        if (ImGui::Begin("≡", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration)) {
+            if (ImGui::Button("Hiện Menu")) {
+                MenDeal = true;
+            }
+        }
+        ImGui::End();
+    }
+
+    // === MENU CHÍNH ===
     if (MenDeal && ImGui::Begin("Menu AOV", &MenDeal)) {
         if (ImGui::BeginTabBar("TabBar")) {
             
@@ -268,6 +290,7 @@ static void* hack_thread(void*) {
     ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cmd, enc);
     [enc endEncoding];
     [cmd presentDrawable:view.currentDrawable];
+    [cmd commit];
 }
 
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {}
