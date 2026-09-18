@@ -9,18 +9,44 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
 
-      - uses: Randomblock1/theos-action@v1
-        with:
-          sdk: iphoneos15.2
-          make-args: clean package
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            build-essential git perl libssl-dev curl wget zip xz-utils \
+            libxml2-utils
 
-      - name: Upload
+      - name: Setup Theos
+        run: |
+          git clone --depth=1 --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+
+      - name: Install SDK
+        run: |
+          $THEOS/bin/install-sdk iPhoneOS15.2.sdk
+
+      - name: Build
+        run: |
+          make clean
+          make package
+          echo "=== Files in packages/ ==="
+          ls -la packages/
+
+      - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: 34306jit
+          name: 34306jit-deb
           path: packages/*.deb
+          retention-days: 7
+
+      - name: Upload Dylib
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 34306jit-dylib
+          path: .theos/obj/arm64/*.dylib
           retention-days: 7
