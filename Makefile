@@ -1,42 +1,19 @@
 ARCHS = arm64
+TARGET = iphone:clang:15.6:14.0
 
-# Tự động lấy SDK có sẵn mới nhất
-SDKVERSION := $(notdir $(patsubst %/,%,$(dir $(firstword $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk/)))))
-SDKVERSION := $(patsubst iPhoneOS%,%,$(SDKVERSION))
-TARGET := iphone:clang:$(SDKVERSION):14.0
+FINALPACKAGE = 1
+FOR_RELEASE = 1
+WARNINGS = 1
+SDKVERSION = 15.6
 
-INSTALL_TARGET_PROCESSES = com.nguyen.AOV
-
-LDFLAGS += -ldobby
-
-include theos/makefiles/common.mk
+include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = 34306jit
 
-34306jit_FILES = \
-    ImGuiDrawView.mm \
-    Esp/JHPP.m \
-    Esp/ImGuiLoad.m \
-    Esp/JHUIViewControllerDecoupler.m \
-    Esp/PubgLoad.mm \
-    IMGUI/Il2cpp.cpp \
-    IMGUI/imgui.cpp \
-    IMGUI/imgui_draw.cpp \
-    IMGUI/imgui_demo.cpp
+$(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation Security QuartzCore CoreGraphics CoreText AVFoundation Accelerate GLKit SystemConfiguration GameController
+$(TWEAK_NAME)_CCFLAGS = -fno-rtti -fvisibility=hidden -DNDEBUG -std=c++11
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-unused-variable -Wno-unused-value -DHAVE_INTTYPES_H -DHAVE_PKCRYPT -DHAVE_STDINT_H -DHAVE_WZAES -DHAVE_ZLIB
+$(TWEAK_NAME)_LDFLAGS += -lresolv -lz -liconv lib/libdaubuoi.a lib/libmonostring.a linh_tinh/spam.a
+$(TWEAK_NAME)_FILES = ImGuiDrawView.mm $(wildcard Esp/*.mm) $(wildcard Esp/*.m) $(wildcard IMGUI/*.cpp) $(wildcard IMGUI/*.mm)
 
-34306jit_CFLAGS = -std=c++17 -fobjc-arc
-34306jit_FRAMEWORKS = UIKit Metal MetalKit
-
-# Tự cài Dobby
-before-all::
-	@if [ ! -f "$(THEOS)/lib/libdobby.a" ]; then \
-		echo "==> Building Dobby..."; \
-		git clone https://github.com/jmpews/Dobby.git -b dev --depth=1 /tmp/Dobby; \
-		cd /tmp/Dobby && make libdobby; \
-		mkdir -p $(THEOS)/lib $(THEOS)/include/dobby; \
-		cp /tmp/Dobby/libdobby.a $(THEOS)/lib/; \
-		cp /tmp/Dobby/include/*.h $(THEOS)/include/dobby/; \
-		echo "==> Dobby ready"; \
-	fi
-
-include theos/makefiles/tweak.mk
+include $(THEOS_MAKE_PATH)/tweak.mk
