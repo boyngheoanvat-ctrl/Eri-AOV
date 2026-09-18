@@ -1,0 +1,9 @@
+Package: com.yourname.34306jit
+Name: 34306jit
+Depends: mobilesubstrate
+Version: 1.0
+Architecture: arm64
+Description: 34306jit Tweak
+Maintainer: Your Name <your@email.com>
+Author: boyngheoanvat
+Section: Tweaks
