@@ -1,74 +1,61 @@
-#import "Esp/ImGuiDrawView.h"
-#import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
-#import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
-#import <mach/mach.h>
-#import <mach/vm_map.h>
-#include <mach-o/loader.h>
-#import "5Toubun/dobby.h"
-#import "IMGUI/imgui.h"
-#import "IMGUI/imgui_impl_metal.h"
-#import "IMGUI/zzz.h"
-#import "il2cpp.h"
-#import <stdio.h>
-#import <string.h>
-
-// ==============================================
-// KHAI BÁO HÀM
-// ==============================================
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex);
-void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex);
-
-#ifdef __cplusplus
-}
-#endif
-
+// ==================================================
+// 1. KHAI BÁO HÀM HỆ THỐNG — ĐẦU TIÊN NHẤT
+// ==================================================
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-#define LOGI(fmt, ...) NSLog(@"[MOD] " fmt, ##__VA_ARGS__)
+#include <mach/mach.h>
+#include <mach/vm_map.h>
+#include <stdio.h>
+#include <string.h>
+#include <pthread.h>
+#include <dispatch/dispatch.h>
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+#import <Metal/Metal.h>
+#import <MetalKit/MetalKit.h>
+#import "5Toubun/dobby.h"
+#import "IMGUI/imgui.h"
+#import "IMGUI/imgui_impl_metal.h"
+#import "IMGUI/zzz.h"
 
+#ifndef OBFUSCATE
+#define OBFUSCATE(s) (s)
+#endif
+
+#define LOGI(fmt, ...) NSLog(@"[MOD] " fmt, ##__VA_ARGS__)
 #define kWidth   [UIScreen mainScreen].bounds.size.width
 #define kHeight  [UIScreen mainScreen].bounds.size.height
 #define kScale   [UIScreen mainScreen].scale
 
-using namespace IL2CPP;
-
-// ==============================================
-// BIẾN TOÀN CỤC
-// ==============================================
+// ==================================================
+// 2. BIẾN TOÀN CỤC — ĐỦ TẤT CẢ
+// ==================================================
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
+
+// Camera
 bool camHookActive = false;
 float SetFieldOfView = 6.0f;
-bool showUltActive = false;
-static bool s_ultApplied = false;
-bool mapActive = false;
-static bool s_mapApplied = false;
+
+// Cam Xa
 bool camXaActive = false;
 static bool s_camXaApplied = false;
 
-typedef float (*fn_cam)(void* _this, int type);
-static fn_cam _cam = nullptr;
-typedef void (*fn_Update)(void* _this);
-static fn_Update _Update = nullptr;
-typedef void (*fn_highrate)(void* _this);
-static fn_highrate _highrate = nullptr;
+// Show Ult
+bool showUltActive = false;
+static bool s_ultApplied = false;
 
-static const char* const targetLibName = "UnityFramework";
-static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
+// Map
+bool mapActive = false;
+static bool s_mapApplied = false;
 
-// ==============================================
-// TÌM BASE ADDRESS
-// ==============================================
+// ==================================================
+// 3. HÀM TÌM BASE ADDRESS — iOS
+// ==================================================
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
     uint32_t cnt = _dyld_image_count();
@@ -83,9 +70,12 @@ uintptr_t get_lib_base(const char* libName) {
     return base;
 }
 
-// ==============================================
-// PATCH BỘ NHỚ — ĐÃ SỬA LỖI BIẾN KHÔNG DÙNG
-// ==============================================
+#define targetLibName OBFUSCATE("UnityFramework")
+static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
+
+// ==================================================
+// 4. HÀM PATCH BỘ NHỚ
+// ==================================================
 static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
@@ -140,9 +130,16 @@ static void RestorePatch(uintptr_t rva, const char* hex) {
     DeactiveCodePatch(kFW, rva, hex);
 }
 
-// ==============================================
-// CAMERA HOOK
-// ==============================================
+// ==================================================
+// 5. HÀM HOOK — CAMERA
+// ==================================================
+typedef float (*fn_cam)(void* _this, int type);
+static fn_cam _cam = nullptr;
+typedef void (*fn_Update)(void* _this);
+static fn_Update _Update = nullptr;
+typedef void (*fn_highrate)(void* _this);
+static fn_highrate _highrate = nullptr;
+
 float cam(void* _this, int type) {
     if (!_cam) return 0.0f;
     return (camHookActive || featureHookToggle) ? SetFieldOfView : _cam(_this, type);
@@ -150,9 +147,9 @@ float cam(void* _this, int type) {
 void Update(void* _this) { if (_Update) _Update(_this); }
 void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
-// ==============================================
-// ANTI-BAN
-// ==============================================
+// ==================================================
+// 6. ANTI-BAN
+// ==================================================
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
@@ -164,20 +161,21 @@ static void ApplyAntiBanPatches() {
     LOGI(@"✅ AntiBan đã sẵn sàng");
 }
 
-// ==============================================
-// CHỜ NẠP UNITYFRAMEWORK
-// ==============================================
+// ==================================================
+// 7. HACK THREAD — CHỜ NẠP LIB
+// ==================================================
 void *hack_thread(void *) {
-    LOGI(@"Thread khởi động, đang tìm UnityFramework...");
+    LOGI(OBFUSCATE("Hack thread started. Đang tìm UnityFramework..."));
 
     do {
         il2cppBase = get_lib_base(targetLibName);
-        if (il2cppBase == 0)
+        if (il2cppBase == 0) {
             il2cppBase = get_lib_base("UnityFramework");
+        }
         usleep(500000);
     } while (il2cppBase == 0);
 
-    LOGI(@"✅ UnityFramework tìm thấy tại: %p", (void*)il2cppBase);
+    LOGI(OBFUSCATE("✅ Lib tìm thấy tại: %p"), (void*)il2cppBase);
 
     ApplyAntiBanPatches();
     
@@ -191,26 +189,41 @@ void *hack_thread(void *) {
     return nullptr;
 }
 
-// ==============================================
-// INTERFACE MENU
-// ==============================================
+// ==================================================
+// 8. MENU & GIAO DIỆN — CUỐI CÙNG
+// ==================================================
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
 @property (nonatomic, assign) BOOL touchDown;
+@property (nonatomic, strong) id<MTLDevice> device;
+@property (nonatomic, strong) id<MTLCommandQueue> cmdQueue;
 @end
 
 @implementation ImGuiDrawView
 
-+ (void)showMenu:(BOOL)open   { MenDeal = open; }
-+ (void)showChange:(BOOL)open { MenDeal = open; }
++ (void)load {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ImGuiDrawView *overlay = [[ImGuiDrawView alloc] initWithFrame:[UIScreen mainScreen].bounds];
+            overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            [[[UIApplication sharedApplication] keyWindow] addSubview:overlay];
+        });
+    });
+}
 
-- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
-    if (!(self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil])) return nil;
-    [self commonInit];
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        [self commonInit];
+    }
     return self;
 }
 
 - (void)commonInit {
+    self.backgroundColor = [UIColor clearColor];
+    self.opaque = NO;
+    self.userInteractionEnabled = YES;
+    
     self.device = MTLCreateSystemDefaultDevice();
     self.cmdQueue = [self.device newCommandQueue];
     
@@ -220,32 +233,24 @@ void *hack_thread(void *) {
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
     ImGui_ImplMetal_Init(self.device);
     
+    self.mtkView = [[MTKView alloc] initWithFrame:self.bounds];
+    self.mtkView.device = self.device;
+    self.mtkView.delegate = self;
+    self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
+    self.mtkView.opaque = NO;
+    self.mtkView.userInteractionEnabled = NO;
+    self.mtkView.framebufferOnly = NO;
+    self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self addSubview:self.mtkView];
+    
     pthread_t th;
     pthread_create(&th, nullptr, hack_thread, nullptr);
     pthread_detach(th);
 }
 
-- (void)loadView {
-    self.view = [[UIView alloc] initWithFrame:[UIScreen mainScreen].bounds];
-}
-
-- (void)viewDidLoad {
-    [super viewDidLoad];
-    self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds];
-    self.mtkView.device = self.device;
-    self.mtkView.delegate = self;
-    self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
-    self.mtkView.opaque = NO;
-    self.mtkView.userInteractionEnabled = YES;
-    self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:self.mtkView];
-}
-
-// ==============================================
-// XỬ LÝ CHẠM MÀN HÌNH
-// ==============================================
+// --- XỬ LÝ CHẠM ---
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    CGPoint p = [[touches anyObject] locationInView:self.view];
+    CGPoint p = [[touches anyObject] locationInView:self];
     if (touches.count >= 3) { MenDeal = !MenDeal; return; }
     if (MenDeal) {
         ImGuiIO& io = ImGui::GetIO();
@@ -258,7 +263,7 @@ void *hack_thread(void *) {
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    CGPoint p = [[touches anyObject] locationInView:self.view];
+    CGPoint p = [[touches anyObject] locationInView:self];
     if (MenDeal && self.touchDown) {
         ImGui::GetIO().MousePos = ImVec2(p.x, p.y);
         return;
@@ -279,14 +284,12 @@ void *hack_thread(void *) {
     [self touchesEnded:touches withEvent:event];
 }
 
-// ==============================================
-// RENDER MENU
-// ==============================================
+// --- RENDER MENU ---
 - (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
-    io.DeltaTime = 1.0f/60.0f;
+    io.DeltaTime = 1.0f / 60.0f;
 
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (!pass) return;
@@ -300,10 +303,13 @@ void *hack_thread(void *) {
     ImGui::NewFrame();
 
     if (MenDeal) {
-        ImGui::SetNextWindowSizeConstraints(ImVec2(280,200), ImVec2(kWidth*0.95f, kHeight*0.9f));
+        ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(280, 200), ImVec2(kWidth*0.95f, kHeight*0.9f));
+        
         if (ImGui::Begin("Menu AOV", &MenDeal)) {
             if (ImGui::BeginTabBar("TabBar")) {
                 
+                // === TAB CAM KÉO ===
                 if (ImGui::BeginTabItem("Cam Kéo")) {
                     ImGui::Checkbox("Kéo Camera", &camHookActive);
                     ImGui::Checkbox("Feature Toggle", &featureHookToggle);
@@ -311,6 +317,7 @@ void *hack_thread(void *) {
                     ImGui::EndTabItem();
                 }
                 
+                // === TAB CAM XA ===
                 if (ImGui::BeginTabItem("Cam Xa")) {
                     bool newCamXa = camXaActive;
                     if (ImGui::Checkbox("Cam Xa 3 Nấc", &newCamXa)) {
@@ -328,6 +335,7 @@ void *hack_thread(void *) {
                     ImGui::EndTabItem();
                 }
                 
+                // === TAB SHOW ULT ===
                 if (ImGui::BeginTabItem("Show Ult")) {
                     bool newUlt = showUltActive;
                     if (ImGui::Checkbox("Hiện Kỹ Năng", &newUlt)) {
@@ -349,6 +357,7 @@ void *hack_thread(void *) {
                     ImGui::EndTabItem();
                 }
                 
+                // === TAB MAP ===
                 if (ImGui::BeginTabItem("Map")) {
                     bool newMap = mapActive;
                     if (ImGui::Checkbox("Map Toàn Cục", &newMap)) {
