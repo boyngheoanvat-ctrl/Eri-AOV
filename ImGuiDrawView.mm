@@ -30,13 +30,8 @@ extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-// ✅ SỬA: OBFUSCATE trả về chuỗi C const char*
-#ifndef OBFUSCATE
-#define OBFUSCATE(s) (s)
-#endif
-
-// ✅ SỬA: LOGI dùng trực tiếp chuỗi C, không thêm @ tự động
-#define LOGI(fmt, ...) NSLog(@"%s" fmt, "[MOD] ", ##__VA_ARGS__)
+// ✅ SỬA: Macro LOGI đơn giản, truyền biến trực tiếp được
+#define LOGI(fmt, ...) NSLog(@"[MOD] " fmt, ##__VA_ARGS__)
 
 #define kWidth  [UIScreen mainScreen].bounds.size.width
 #define kHeight [UIScreen mainScreen].bounds.size.height
@@ -149,19 +144,19 @@ void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
 // ========== ANTIBAN ==========
 static void ApplyAntiBanPatches() {
-    LOGI("=== ÁP DỤNG ANTIBAN ===");
+    LOGI(@"=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x4C3E394, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x6C46CFC, "0x000080D2C0035FD6");
     DeactiveCodePatch(kFW, 0x6C46220, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x6C45E70, "0x000080D2C0035FD6");
     DeactiveCodePatch(kFW, 0x6C462B8, "0x000080D2C0035FD6");
-    LOGI("✅ AntiBan đã áp dụng tự động");
+    LOGI(@"✅ AntiBan đã áp dụng tự động");
 }
 
 // ========== HACK THREAD ==========
 void *hack_thread(void *) {
-    LOGI("Hack thread started. Searching for lib...");
+    LOGI(@"Hack thread started. Searching for lib...");
 
     do {
         il2cppBase = get_lib_base(targetLibName);
@@ -171,9 +166,8 @@ void *hack_thread(void *) {
         usleep(500000);
     } while (il2cppBase == 0);
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "Lib found at: %p", (void*)il2cppBase);
-    LOGI(buf);
+    // ✅ SỬA: Truyền trực tiếp định dạng, không dùng buf trung gian
+    LOGI(@"Lib found at: %p", (void*)il2cppBase);
 
     ApplyAntiBanPatches();
     
@@ -182,7 +176,7 @@ void *hack_thread(void *) {
         DobbyHook((void*)UF(0x51C4048), (void*)cam, (void**)&_cam);
         DobbyHook((void*)UF(0x51C2C04), (void*)Update, (void**)&_Update);
         DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
-        LOGI("✅ Camera hooks đã sẵn sàng");
+        LOGI(@"✅ Camera hooks đã sẵn sàng");
     });
     return nullptr;
 }
