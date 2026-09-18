@@ -1,12 +1,14 @@
-#import <UIKit/UIKit.h>
+#import "Esp/ImGuiDrawView.h"
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <Foundation/Foundation.h>
-#include "5Toubun/dobby.h"
+#import "5Toubun/dobby.h"
 #import "IMGUI/imgui.h"
 #import "IMGUI/imgui_impl_metal.h"
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
+#import <mach/mach.h>
+#import <mach/vm_map.h>
 
 #define kWidth  [UIScreen mainScreen].bounds.size.width
 #define kHeight [UIScreen mainScreen].bounds.size.height
@@ -21,17 +23,25 @@ bool ShowUlt = false;
 bool Map = false;
 bool MenDeal = true;
 
-// ========== HÀM TRỢ GIÚP — LẤY ĐỊA CHỈ DỰA TRÊN BASE ==========
+// ========== HÀM TRỢ GIÚP LẤY ĐỊA CHỈ ==========
+static uintptr_t g_ufBase = 0;
 static void* GetImageBase(const char* name) {
     void* h = dlopen(name, RTLD_LAZY);
     if (!h) return nullptr;
     return dlsym(h, "_mh_execute_header");
 }
-
-static uintptr_t g_ufBase = 0;
 static uintptr_t UF(uintptr_t rva) {
     if (!g_ufBase) g_ufBase = (uintptr_t)GetImageBase("/Frameworks/UnityFramework.framework/UnityFramework");
     return g_ufBase + rva;
+}
+
+// ========== GHI TRỰC TIẾP VÀO BỘ NHỚ ==========
+static bool PatchMemory(void* addr, const void* data, size_t len) {
+    vm_prot_t old;
+    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
+        return false;
+    memcpy(addr, data, len);
+    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
 }
 
 // ========== CAMERA HOOK ==========
@@ -54,34 +64,7 @@ void hook_OnCamChanged(void* _this) {
     if (orig_OnCamChanged) orig_OnCamChanged(_this);
 }
 
-// ========== PATCH BYTES — Ghi trực tiếp vào bộ nhớ ==========
-#include <mach/mach.h>
-#include <mach/vm_map.h>
-
-static bool PatchMemory(void* addr, const void* data, size_t len) {
-    vm_prot_t old;
-    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
-        return false;
-    memcpy(addr, data, len);
-    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
-}
-
-static uint32_t Hex2U32(const char* hex) {
-    char buf[9] = {0};
-    strncpy(buf, hex, 8);
-    return (uint32_t)strtoul(buf, nullptr, 16);
-}
-
-static bool PatchARM64(uintptr_t rva, const char* hex) {
-    uint32_t insn = Hex2U32(hex);
-    return PatchMemory((void*)UF(rva), &insn, 4);
-}
-
-@interface ImGuiDrawView () <MTKViewDelegate>
-@property (nonatomic, strong) id<MTLDevice> device;
-@property (nonatomic, strong) id<MTLCommandQueue> cmdQueue;
-@end
-
+// ========== IMPLEMENTATION ==========
 @implementation ImGuiDrawView
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
@@ -98,6 +81,8 @@ static bool PatchARM64(uintptr_t rva, const char* hex) {
 }
 
 + (void)showMenu:(BOOL)open { MenDeal = open; }
++ (void)showChange:(BOOL)open { MenDeal = open; }
+
 - (MTKView *)mtkView { return (MTKView *)self.view; }
 - (void)loadView { self.view = [[MTKView alloc] initWithFrame:[UIScreen mainScreen].bounds]; }
 
@@ -107,9 +92,7 @@ static bool PatchARM64(uintptr_t rva, const char* hex) {
     self.mtkView.delegate = self;
     self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     
-    // === GẮN HOOK BẰNG DOBBY — KHÔNG DÙNG MACRO CŨ ===
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        // Camera
         DobbyHook((void*)UF(0x51C4048), (void*)hook_GetCamHeight, (void**)&orig_GetCamHeight);
         DobbyHook((void*)UF(0x51C2C04), (void*)hook_Update, (void**)&orig_Update);
         DobbyHook((void*)UF(0x51C46A0), (void*)hook_OnCamChanged, (void**)&orig_OnCamChanged);
@@ -117,7 +100,7 @@ static bool PatchARM64(uintptr_t rva, const char* hex) {
     });
 }
 
-#pragma mark - Touch
+#pragma mark - Touch Input
 - (void)updateIO:(UIEvent *)e {
     UITouch *t = e.allTouches.anyObject; if (!t) return;
     CGPoint p = [t locationInView:self.view];
@@ -155,8 +138,7 @@ static bool PatchARM64(uintptr_t rva, const char* hex) {
                 ImGui::Checkbox("🔒 Khóa Camera", &lockcam);
                 ImGui::SliderFloat("📐 Độ Cao", &SetFieldOfView, 0.1f, 10.0f);
                 if (lockcam != wasLock) {
-                    // Khi bật/tắt → patch/nop trực tiếp
-                    uint32_t pOn  = 0x52800020; // mov w0, #0x20; ret
+                    uint32_t pOn  = 0x52800020; // mov w0, #0x20
                     uint32_t pOff = 0xD50320C0; // ret
                     PatchMemory((void*)UF(0x525BE48), lockcam ? &pOn : &pOff, 4);
                     wasLock = lockcam;
@@ -165,7 +147,7 @@ static bool PatchARM64(uintptr_t rva, const char* hex) {
                 ImGui::EndTabItem();
             }
             
-            // === SHOW ULTR ĐỊCH ===
+            // === SHOW ULT ĐỊCH ===
             if (ImGui::BeginTabItem("Show Ult Địch")) {
                 static bool wasUlt = false;
                 ImGui::Checkbox("👁️ Hiện Kỹ Năng Địch", &ShowUlt);
