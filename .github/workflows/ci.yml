@@ -17,24 +17,34 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y \
-            build-essential git perl libssl-dev curl wget zip xz-utils \
-            libxml2-utils
+            build-essential git perl libssl-dev curl wget zip unzip xz-utils
 
       - name: Setup Theos
         run: |
           git clone --depth=1 --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
           echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
 
-      - name: Install SDK
+      - name: Download & setup SDK — Cách chính thức
         run: |
-          $THEOS/bin/install-sdk iPhoneOS15.2.sdk
+          mkdir -p $THEOS/sdks
+          cd $THEOS/sdks
+          # Tải toàn bộ SDK từ repo theos/sdks
+          curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o sdks.zip
+          unzip -q sdks.zip
+          mv sdks-master/*.sdk ./
+          rm -rf sdks-master sdks.zip
+          ls -la
+          # Dùng iPhoneOS15.6.sdk (có sẵn trong repo)
+          echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
       - name: Build
         run: |
           make clean
           make package
-          echo "=== Files in packages/ ==="
+          echo "=== DEB files ==="
           ls -la packages/
+          echo "=== DYLIB files ==="
+          find .theos -name "*.dylib" 2>/dev/null
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
@@ -48,5 +58,5 @@ jobs:
         if: always()
         with:
           name: 34306jit-dylib
-          path: .theos/obj/arm64/*.dylib
+          path: .theos/obj/**/*.dylib
           retention-days: 7
