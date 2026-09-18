@@ -40,16 +40,16 @@ jobs:
           rm -rf "$TMP" master.zip
           echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: ✅ Tải libdobby.a — Đúng đường dẫn từ log
+      - name: Tải Dobby (arm64) + header
         run: |
           mkdir -p lib
           cd lib
           curl -L -o dobby.tar.gz https://github.com/jmpews/Dobby/releases/download/latest/dobby-iphoneos-all.tar.gz
           tar -xzvf dobby.tar.gz
-          # Dùng arm64 — khớp với ARCHS = arm64 trong Makefile
-          cp build/iphoneos/arm64/libdobby.a ./libdobby.a
+          cp build/iphoneos/arm64/libdobby.a ./
+          cp build/iphoneos/dobby.h ./
           rm -rf dobby.tar.gz build
-          ls -la libdobby.a
+          ls -la
 
       - name: Build Tweak
         run: |
@@ -61,12 +61,4 @@ jobs:
         with:
           name: 34306jit-DEB
           path: packages/*.deb
-          retention-days: 7
-
-      - name: Upload Dylib
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: 34306jit-DYLIB
-          path: .theos/obj/arm64/*.dylib
           retention-days: 7
