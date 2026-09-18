@@ -40,17 +40,16 @@ jobs:
           rm -rf "$TMP" master.zip
           echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: Build Dobby from source (chắc chắn đúng)
+      - name: ✅ Tải libdobby.a (iOS-arm64) từ Release chính thức
         run: |
-          sudo apt-get install -y cmake
-          git clone --depth=1 https://github.com/jmpews/Dobby.git /tmp/dobby
-          cd /tmp/dobby
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=cmake/ios.toolchain.cmake -DPLATFORM=OS64 -DARCHS=arm64
-          make -j4
-          mkdir -p "$GITHUB_WORKSPACE/lib"
-          cp libdobby.a "$GITHUB_WORKSPACE/lib/libdobby.a"
-          ls -la "$GITHUB_WORKSPACE/lib/libdobby.a"
+          mkdir -p lib
+          cd lib
+          # Tải file zip chứa libdobby.a cho iOS-arm64
+          curl -L -o dobby.zip https://github.com/jmpews/Dobby/releases/download/latest/dobby-ios-arm64.tar.xz
+          tar -xf dobby.zip
+          cp libdobby.a ./
+          rm -rf dobby.zip include
+          ls -la libdobby.a
 
       - name: Build Tweak
         run: |
