@@ -33,6 +33,13 @@ uintptr_t il2cppBase = 0;
 bool MenDeal = false;
 float SetFieldOfView = 6.0f;
 
+// ===== ESP SETTINGS =====
+bool ESP_Enable = false;
+bool ESP_ShowName = true;
+bool ESP_ShowDistance = true;
+bool ESP_ShowBox = true;
+bool ESP_ShowLine = true;
+
 // ========== LẤY ĐỊA CHỈ BASE ==========
 static const char* kTargetLibName = OBFUSCATE("UnityFramework");
 
@@ -117,6 +124,61 @@ static void* hack_thread(void*) {
     return nullptr;
 }
 
+// ========== HÀM VẼ ESP ==========
+static void DrawESP() {
+    if (!ESP_Enable || !il2cppBase) return;
+    
+    ImDrawList* drawList = ImGui::GetForegroundDrawList();
+    if (!drawList) return;
+
+    // === VÍ DỤ ESP — Vẽ đường kẻ + khung tham chiếu ===
+    // Khi có địa chỉ lấy tọa độ thực, thay phần này bằng dữ liệu từ game
+    static float demoAngle = 0.0f;
+    demoAngle += 0.02f;
+    
+    // Vị trí trung tâm màn hình
+    ImVec2 center = ImVec2(kWidth / 2.0f, kHeight / 2.0f);
+    
+    // Vẽ demo: 3 "kẻ địch" di chuyển tròn — thay bằng vòng lặp lấy từ danh sách thật
+    float enemyPositions[3][2] = {
+        {center.x + cosf(demoAngle) * 200, center.y + sinf(demoAngle) * 150},
+        {center.x + cosf(demoAngle + 2.094f) * 250, center.y + sinf(demoAngle + 2.094f) * 180},
+        {center.x + cosf(demoAngle + 4.188f) * 180, center.y + sinf(demoAngle + 4.188f) * 220}
+    };
+    const char* enemyNames[3] = {"敌1", "敌2", "敌3"};
+    float enemyDistances[3] = {15.5f, 22.3f, 18.7f};
+
+    for (int i = 0; i < 3; i++) {
+        ImVec2 pos = ImVec2(enemyPositions[i][0], enemyPositions[i][1]);
+        
+        // Đường kẻ từ tâm màn hình đến địch
+        if (ESP_ShowLine) {
+            drawList->AddLine(center, pos, IM_COL32(255, 50, 50, 200), 2.0f);
+        }
+        
+        // Khung bao quanh địch
+        if (ESP_ShowBox) {
+            ImVec2 boxMin = ImVec2(pos.x - 30, pos.y - 45);
+            ImVec2 boxMax = ImVec2(pos.x + 30, pos.y + 45);
+            drawList->AddRect(boxMin, boxMax, IM_COL32(255, 50, 50, 220), 3.0f, 0, 2.0f);
+        }
+        
+        // Tên
+        if (ESP_ShowName) {
+            char nameBuf[64];
+            snprintf(nameBuf, sizeof(nameBuf), "%s", enemyNames[i]);
+            drawList->AddText(ImVec2(pos.x - 25, pos.y - 60), IM_COL32(255, 255, 255, 255), nameBuf);
+        }
+        
+        // Khoảng cách
+        if (ESP_ShowDistance) {
+            char distBuf[64];
+            snprintf(distBuf, sizeof(distBuf), "%.1fm", enemyDistances[i]);
+            drawList->AddText(ImVec2(pos.x - 20, pos.y + 50), IM_COL32(100, 255, 100, 255), distBuf);
+        }
+    }
+}
+
 // ========== IMPLEMENTATION ==========
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
@@ -164,7 +226,7 @@ static void* hack_thread(void*) {
     [self.view addSubview:self.mtkView];
 }
 
-#pragma mark - Touch
+#pragma mark - CHẠM 3 NGÓN → BẬT/TẮT MENU
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (touches.count >= 3) {
         MenDeal = !MenDeal;
@@ -185,7 +247,7 @@ static void* hack_thread(void*) {
     [super touchesCancelled:touches withEvent:event];
 }
 
-#pragma mark - Render
+#pragma mark - RENDER
 - (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
@@ -206,56 +268,69 @@ static void* hack_thread(void*) {
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
-    // === NÚT DỰ PHÒNG ===
-    if (!MenDeal) {
-        ImGui::SetNextWindowPos(ImVec2(20, 20));
-        if (ImGui::Begin("≡", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration)) {
-            if (ImGui::Button("Hien Menu")) {
-                MenDeal = YES;
-            }
-        }
-        ImGui::End();
-    }
+    // === VẼ ESP — LUÔN VẼ KHI BẬT ===
+    DrawESP();
 
     // === MENU CHÍNH ===
-    if (MenDeal && ImGui::Begin("Menu AOV", &MenDeal)) {
-        if (ImGui::BeginTabBar("TabBar")) {
-            
-            if (ImGui::BeginTabItem("Camera")) {
-                ImGui::Checkbox("Enable Hook", &featureHookToggle);
-                ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f);
-                ImGui::EndTabItem();
-            }
-            
-            if (ImGui::BeginTabItem("Show Ult")) {
-                static bool ShowUlt = false, wasUlt = false;
-                ImGui::Checkbox("Show Enemy Skill", &ShowUlt);
-                if (ShowUlt != wasUlt && il2cppBase) {
-                    uint32_t pOn  = 0x52800020;
-                    uint32_t pOff = 0xD50320C0;
-                    PatchMemory((void*)UF(0x5BA7218), ShowUlt ? &pOn : &pOff, 4);
-                    PatchMemory((void*)UF(0x6660B80), ShowUlt ? &pOn : &pOff, 4);
-                    PatchMemory((void*)UF(0x6660A1C), ShowUlt ? &pOn : &pOff, 4);
-                    wasUlt = ShowUlt;
+    if (MenDeal) {
+        ImGui::SetNextWindowSizeConstraints(
+            ImVec2(280, 200),
+            ImVec2(kWidth * 0.95f, kHeight * 0.9f)
+        );
+
+        if (ImGui::Begin("Menu AOV", &MenDeal)) {
+            if (ImGui::BeginTabBar("TabBar")) {
+                
+                if (ImGui::BeginTabItem("Camera")) {
+                    ImGui::Checkbox("Enable Hook", &featureHookToggle);
+                    ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f);
+                    ImGui::EndTabItem();
                 }
-                ImGui::EndTabItem();
-            }
-            
-            if (ImGui::BeginTabItem("Map")) {
-                static bool Map = false, wasMap = false;
-                ImGui::Checkbox("Enable Map", &Map);
-                if (Map != wasMap && il2cppBase) {
-                    uint32_t pOn  = 0xD2800036;
-                    uint32_t pOff = 0xD50320C0;
-                    PatchMemory((void*)UF(0x4826BB8), Map ? &pOn : &pOff, 4);
-                    wasMap = Map;
+
+                // === TAB ESP MỚI ===
+                if (ImGui::BeginTabItem("ESP")) {
+                    ImGui::Checkbox("Enable ESP", &ESP_Enable);
+                    ImGui::Separator();
+                    ImGui::Checkbox("Show Name", &ESP_ShowName);
+                    ImGui::Checkbox("Show Distance", &ESP_ShowDistance);
+                    ImGui::Checkbox("Show Box", &ESP_ShowBox);
+                    ImGui::Checkbox("Show Line", &ESP_ShowLine);
+                    ImGui::Spacing();
+                    ImGui::TextColored(ImVec4(1, 1, 0, 1), "⚠️ Demo mode — hiển thị mẫu");
+                    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1), "Khi có địa chỉ lấy tọa độ sẽ cập nhật thật");
+                    ImGui::EndTabItem();
                 }
-                ImGui::EndTabItem();
+                
+                if (ImGui::BeginTabItem("Show Ult")) {
+                    static bool ShowUlt = false, wasUlt = false;
+                    ImGui::Checkbox("Show Enemy Skill", &ShowUlt);
+                    if (ShowUlt != wasUlt && il2cppBase) {
+                        uint32_t pOn  = 0x52800020;
+                        uint32_t pOff = 0xD50320C0;
+                        PatchMemory((void*)UF(0x5BA7218), ShowUlt ? &pOn : &pOff, 4);
+                        PatchMemory((void*)UF(0x6660B80), ShowUlt ? &pOn : &pOff, 4);
+                        PatchMemory((void*)UF(0x6660A1C), ShowUlt ? &pOn : &pOff, 4);
+                        wasUlt = ShowUlt;
+                    }
+                    ImGui::EndTabItem();
+                }
+                
+                if (ImGui::BeginTabItem("Map")) {
+                    static bool Map = false, wasMap = false;
+                    ImGui::Checkbox("Enable Map", &Map);
+                    if (Map != wasMap && il2cppBase) {
+                        uint32_t pOn  = 0xD2800036;
+                        uint32_t pOff = 0xD50320C0;
+                        PatchMemory((void*)UF(0x4826BB8), Map ? &pOn : &pOff, 4);
+                        wasMap = Map;
+                    }
+                    ImGui::EndTabItem();
+                }
+                
+                ImGui::EndTabBar();
             }
-            
-            ImGui::EndTabBar();
+            ImGui::End();
         }
-        ImGui::End();
     }
 
     ImGui::Render();
