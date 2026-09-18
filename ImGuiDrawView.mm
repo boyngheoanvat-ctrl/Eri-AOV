@@ -128,12 +128,10 @@ static void* hack_thread(void*) {
     return nullptr;
 }
 
-// ✅ SỬA: Thêm @interface mở rộng khai báo property
+// ✅ CHỈ thêm property CHƯA có trong .h — BỎ device & cmdQueue đã khai báo
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
 @property (nonatomic, assign) BOOL touchDown;
-@property (nonatomic, strong) id<MTLDevice> device;
-@property (nonatomic, strong) id<MTLCommandQueue> cmdQueue;
 @end
 
 @implementation ImGuiDrawView
@@ -148,13 +146,16 @@ static void* hack_thread(void*) {
 }
 
 - (void)commonInit {
-    _device = MTLCreateSystemDefaultDevice();
-    _cmdQueue = [_device newCommandQueue];
+    // device & cmdQueue đã có từ .h → dùng trực tiếp
+    self.device = MTLCreateSystemDefaultDevice();
+    self.cmdQueue = [self.device newCommandQueue];
+    
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
-    ImGui_ImplMetal_Init(_device);
+    ImGui_ImplMetal_Init(self.device);
+    
     pthread_t th; pthread_create(&th, nullptr, hack_thread, nullptr); pthread_detach(th);
 }
 
@@ -165,7 +166,7 @@ static void* hack_thread(void*) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds];
-    self.mtkView.device = _device;
+    self.mtkView.device = self.device;
     self.mtkView.delegate = self;
     self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     self.mtkView.opaque = NO;
@@ -182,14 +183,14 @@ static void* hack_thread(void*) {
         ImGuiIO& io = ImGui::GetIO();
         io.MousePos = ImVec2(p.x, p.y);
         io.MouseDown[0] = YES;
-        _touchDown = YES;
+        self.touchDown = YES;
         return;
     }
     [super touchesBegan:touches withEvent:event];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint p = [[touches anyObject] locationInView:self.view];
-    if (MenDeal && _touchDown) {
+    if (MenDeal && self.touchDown) {
         ImGui::GetIO().MousePos = ImVec2(p.x, p.y);
         return;
     }
@@ -198,7 +199,7 @@ static void* hack_thread(void*) {
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (MenDeal) {
         ImGui::GetIO().MouseDown[0] = NO;
-        _touchDown = NO;
+        self.touchDown = NO;
         return;
     }
     [super touchesEnded:touches withEvent:event];
@@ -219,7 +220,7 @@ static void* hack_thread(void*) {
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0,0,0,0);
 
-    id<MTLCommandBuffer> cmd = [_cmdQueue commandBuffer];
+    id<MTLCommandBuffer> cmd = [self.cmdQueue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
 
     ImGui_ImplMetal_NewFrame(pass);
