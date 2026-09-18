@@ -37,17 +37,18 @@ jobs:
           mv sdks-master/*.sdk ./
           rm -rf sdks-master sdks.zip
 
-      - name: Build
+      - name: Build — arm64 + arm64e
         run: |
           export THEOS="$GITHUB_WORKSPACE/theos"
           export THEOS_MAKE_PATH="$THEOS/makefiles"
           export THEOS_SDK="iPhoneOS15.6.sdk"
+          make clean
           make package
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: 34306jit-deb
+          name: 34306jit-FULL
           path: packages/*.deb
           retention-days: 7
 
@@ -55,6 +56,6 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: 34306jit-dylib
+          name: 34306jit-dylib-FULL
           path: .theos/obj/**/*.dylib
           retention-days: 7
