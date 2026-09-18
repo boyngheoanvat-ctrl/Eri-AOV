@@ -20,10 +20,18 @@ jobs:
         export THEOS="$GITHUB_WORKSPACE/theos"
         echo "THEOS=$THEOS" >> $GITHUB_ENV
 
-    - name: Download iPhone SDKs
+    - name: Fix & Download SDKs
       run: |
         export THEOS="$GITHUB_WORKSPACE/theos"
-        git clone --depth=1 https://github.com/theos/sdks.git "$THEOS/sdks"
+        # Xóa thư mục nếu tồn tại nhưng trống/lỗi
+        if [ -d "$THEOS/sdks" ] && [ -z "$(ls -A $THEOS/sdks)" ]; then
+          rm -rf "$THEOS/sdks"
+        fi
+        # Tải SDKs nếu chưa có
+        if [ ! -d "$THEOS/sdks" ]; then
+          git clone --depth=1 https://github.com/theos/sdks.git "$THEOS/sdks"
+        fi
+        echo "SDKs available:"
         ls -la "$THEOS/sdks/"
 
     - name: Install dependencies
