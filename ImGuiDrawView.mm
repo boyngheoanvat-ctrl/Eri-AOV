@@ -22,23 +22,20 @@ using namespace IL2CPP;
 // ========== BIẾN TOÀN CỤC ==========
 bool lockcam = false;
 float SetFieldOfView = 2.0f;
-bool ShowUlt = false;
-bool ShowName = false;
-bool ShowHP = false;
+bool ShowUlt = false;   // 3 địa chỉ chung 1 nút
 bool Map = false;
 bool MenDeal = true;
 
-// ========== CAMERA HOOK ==========
+// ========== CAM KÉO ==========
 float(*cam)(void* _this);
 float _cam(void* _this) {
     if (lockcam) return SetFieldOfView;
-    if (cam) return cam(_this);
-    return 2.0f;
+    return cam(_this);
 }
 
 void (*highrate)(void *instance);
 void _highrate(void *instance) {
-    if (highrate) highrate(instance);
+    highrate(instance);
 }
 
 void (*Update)(void *instance);
@@ -46,20 +43,8 @@ void _Update(void *instance) {
     if (instance != NULL) {
         _highrate(instance);
     }
-    if (lockcam) {
-        return;
-    }
-    if (Update) Update(instance);
-}
-
-// ========== MAP HOOK ==========
-typedef bool (*SetVisible_t)(void* self, int camp, bool bVisible, bool forceSync);
-SetVisible_t orig_SetVisible = NULL;
-bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
-    if (Map) return true;
-    if (orig_SetVisible)
-        return orig_SetVisible(self, camp, bVisible, forceSync);
-    return bVisible;
+    if (lockcam) return;
+    return Update(instance);
 }
 
 @interface ImGuiDrawView () <MTKViewDelegate>
@@ -73,7 +58,6 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
 {
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
     if (!self) return nil;
-
     _device = MTLCreateSystemDefaultDevice();
     _commandQueue = [_device newCommandQueue];
     if (!self.device) return nil;
@@ -82,52 +66,34 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     ImGui::StyleColorsClassic();
-    
     ImFont* font = io.Fonts->AddFontFromMemoryCompressedTTF(
         (void*)zzz_compressed_data, zzz_compressed_size, 24.0f,
         NULL, io.Fonts->GetGlyphRangesVietnamese());
-    
     ImGui_ImplMetal_Init(_device);
     return self;
 }
 
 + (void)showChange:(BOOL)open { MenDeal = open; }
-
 - (MTKView *)mtkView { return (MTKView *)self.view; }
-
 - (void)loadView {
     self.view = [[MTKView alloc] initWithFrame:[UIScreen mainScreen].bounds];
 }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
     Spam *spam = [[Spam alloc] init];
     [spam startSpam];
-    
     self.mtkView.device = self.device;
     self.mtkView.delegate = self;
-    self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
+    self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     self.mtkView.backgroundColor = [UIColor clearColor];
 
-    // ========== GẮN IL2CPP & HOOK ==========
     @try {
         void Il2CppAttachOld();
         Il2CppAttachOld();
-        
-        Il2CppMethod methodAccessSystem2("Project.Plugins_d.dll");
-        uint64_t setVisibleOffset = methodAccessSystem2
-            .getClass("NucleusDrive.Logic", "LVActorLinker")
-            .getMethod("SetVisible", 3);
-        if (setVisibleOffset) {
-            HOOK(setVisibleOffset, hook_SetVisible, orig_SetVisible);
-        }
-
-        // ========== CAMERA HOOK — SỬA: BỎ ENCRYPTOFFSET ==========
         HOOK((uint64_t)0x51C4048, _cam, cam);
         HOOK((uint64_t)0x51C2C04, _Update, Update);
         HOOK((uint64_t)0x51C46A0, _highrate, highrate);
-        
     } @catch (NSException *e) {
         NSLog(@"Hook lỗi: %@", e);
     }
@@ -135,13 +101,12 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
 
 #pragma mark - Touch
 - (void)updateIOWithTouchEvent:(UIEvent *)event {
-    UITouch *touch = event.allTouches.anyObject;
-    if (!touch) return;
-    CGPoint pos = [touch locationInView:self.view];
+    UITouch *t = event.allTouches.anyObject;
+    if (!t) return;
+    CGPoint p = [t locationInView:self.view];
     ImGuiIO& io = ImGui::GetIO();
-    io.MousePos = ImVec2(pos.x, pos.y);
-    BOOL down = (touch.phase != UITouchPhaseEnded && touch.phase != UITouchPhaseCancelled);
-    io.MouseDown[0] = down;
+    io.MousePos = ImVec2(p.x, p.y);
+    io.MouseDown[0] = (t.phase != UITouchPhaseEnded && t.phase != UITouchPhaseCancelled);
 }
 - (void)touchesBegan:(NSSet *)t withEvent:(UIEvent *)e { [self updateIOWithTouchEvent:e]; }
 - (void)touchesMoved:(NSSet *)t withEvent:(UIEvent *)e { [self updateIOWithTouchEvent:e]; }
@@ -154,28 +119,26 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
-    io.DeltaTime = 1.0f / 60.0f;
-
+    io.DeltaTime = 1.0f/60.0f;
     self.view.userInteractionEnabled = MenDeal;
-    
+
     id<MTLCommandBuffer> cmd = [_commandQueue commandBuffer];
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (!pass) return;
-    
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
-    
+
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
     ImGui::GetFont()->Scale = 15.f / ImGui::GetFont()->FontSize;
 
-    ImGui::SetNextWindowPos(ImVec2((kWidth-380)/2, (kHeight-320)/2), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(380, 320), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2((kWidth-340)/2, (kHeight-300)/2), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(340, 300), ImGuiCond_FirstUseEver);
 
     if (MenDeal) {
         if (ImGui::Begin("Menu AOV", &MenDeal)) {
             if (ImGui::BeginTabBar("TabBar")) {
                 
-                // === TAB CHỐNG CẤM ===
+                // === CHỐNG CẤM ===
                 if (ImGui::BeginTabItem("Chống Cấm")) {
                     ImGui::TextDisabled("Antiban Auto Bật");
                     ImGui::Separator();
@@ -188,29 +151,25 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
                     ImGui::EndTabItem();
                 }
 
-                // === TAB CAMERA ===
+                // === CAMERA ===
                 if (ImGui::BeginTabItem("Camera")) {
                     ImGui::Checkbox("🔒 Khóa Camera", &lockcam);
                     ImGui::SliderFloat("📐 Độ Cao", &SetFieldOfView, 0.1f, 10.0f);
-                    ImGui::TextDisabled("Patch: 0x525BE48 Auto");
+                    ImGui::TextDisabled("Patch: 0x525BE48 ✅");
                     ImGui::EndTabItem();
                 }
 
-                // === TAB ESP ===
-                if (ImGui::BeginTabItem("ESP")) {
-                    ImGui::Checkbox("👁️ Hiện Kỹ Năng", &ShowUlt);
-                    ImGui::TextDisabled("Patch: 0x5BA7218 Auto");
-                    ImGui::Checkbox("🏷️ Hiện Tên", &ShowName);
-                    ImGui::TextDisabled("Patch: 0x6660A1C Auto");
-                    ImGui::Checkbox("❤️ Hiện Máu", &ShowHP);
-                    ImGui::TextDisabled("Patch: 0x6660B80 Auto");
+                // === SHOW UNT ĐỊCH — 3 MÃ CHUNG ===
+                if (ImGui::BeginTabItem("Show Ult Địch")) {
+                    ImGui::Checkbox("👁️ Hiện Kỹ Năng Địch", &ShowUlt);
+                    ImGui::TextDisabled("0x5BA7218 | 0x6660B80 | 0x6660A1C ✅");
                     ImGui::EndTabItem();
                 }
 
-                // === TAB MAP ===
+                // === MAP ===
                 if (ImGui::BeginTabItem("Map")) {
                     ImGui::Checkbox("🗺️ Hack Map", &Map);
-                    ImGui::TextDisabled("Patch: 0x4826BB8 Auto");
+                    ImGui::TextDisabled("Patch: 0x4826BB8 ✅");
                     ImGui::EndTabItem();
                 }
 
@@ -220,10 +179,12 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
         ImGui::End();
     }
 
-    // ========== PATCH — SỬA: CHUYỂN KIỂU CHAR* ==========
     static char fw[] = "Frameworks/UnityFramework.framework/UnityFramework";
-    
-    // ANTIBAN — LUÔN BẬT
+    char codeUlt[] = "20008052C0035FD6";
+    char codeCam[] = "20008052C0035FD6";
+    char codeMap[] = "360080D2";
+
+    // ========== ANTIBAN — LUÔN BẬT ==========
     { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x5F88E3C, p); }
     { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x4C3E394, p); }
     { char p[] = "000080D2C0035FD6";        ActiveCodePatch(fw, 0x6C46CFC, p); }
@@ -231,63 +192,37 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
     { char p[] = "000080D2C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x6C45E70, p); }
     { char p[] = "000080D2C0035FD6";        ActiveCodePatch(fw, 0x6C462B8, p); }
     
-    // CAM XA
+    // ========== CAM KÉO ==========
     static bool camActive = false;
     if (lockcam && !camActive) {
-        char p[] = "20008052C0035FD6";
-        ActiveCodePatch(fw, 0x525BE48, p);
+        ActiveCodePatch(fw, 0x525BE48, codeCam);
         camActive = true;
     } else if (!lockcam && camActive) {
-        char p[] = "20008052C0035FD6";
-        DeactiveCodePatch(fw, 0x525BE48, p);
+        DeactiveCodePatch(fw, 0x525BE48, codeCam);
         camActive = false;
     }
     
-    // SHOW ULT
+    // ========== SHOW UNT ĐỊCH — 3 ĐỊA CHỈ CÙNG 1 NÚT ==========
     static bool ultActive = false;
     if (ShowUlt && !ultActive) {
-        char p[] = "20008052C0035FD6";
-        ActiveCodePatch(fw, 0x5BA7218, p);
+        ActiveCodePatch(fw, 0x5BA7218, codeUlt);
+        ActiveCodePatch(fw, 0x6660B80, codeUlt);
+        ActiveCodePatch(fw, 0x6660A1C, codeUlt);
         ultActive = true;
     } else if (!ShowUlt && ultActive) {
-        char p[] = "20008052C0035FD6";
-        DeactiveCodePatch(fw, 0x5BA7218, p);
+        DeactiveCodePatch(fw, 0x5BA7218, codeUlt);
+        DeactiveCodePatch(fw, 0x6660B80, codeUlt);
+        DeactiveCodePatch(fw, 0x6660A1C, codeUlt);
         ultActive = false;
     }
     
-    // SHOW HP
-    static bool hpActive = false;
-    if (ShowHP && !hpActive) {
-        char p[] = "20008052C0035FD6";
-        ActiveCodePatch(fw, 0x6660A1C, p);
-        hpActive = true;
-    } else if (!ShowHP && hpActive) {
-        char p[] = "20008052C0035FD6";
-        DeactiveCodePatch(fw, 0x6660A1C, p);
-        hpActive = false;
-    }
-    
-    // SHOW NAME / RANK
-    static bool nameActive = false;
-    if (ShowName && !nameActive) {
-        char p[] = "20008052C0035FD6";
-        ActiveCodePatch(fw, 0x6660B80, p);
-        nameActive = true;
-    } else if (!ShowName && nameActive) {
-        char p[] = "20008052C0035FD6";
-        DeactiveCodePatch(fw, 0x6660B80, p);
-        nameActive = false;
-    }
-    
-    // MAP
+    // ========== HACK MAP ==========
     static bool mapActive = false;
     if (Map && !mapActive) {
-        char p[] = "360080D2";
-        ActiveCodePatch(fw, 0x4826BB8, p);
+        ActiveCodePatch(fw, 0x4826BB8, codeMap);
         mapActive = true;
     } else if (!Map && mapActive) {
-        char p[] = "360080D2";
-        DeactiveCodePatch(fw, 0x4826BB8, p);
+        DeactiveCodePatch(fw, 0x4826BB8, codeMap);
         mapActive = false;
     }
 
