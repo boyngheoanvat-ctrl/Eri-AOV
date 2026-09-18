@@ -12,7 +12,7 @@
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
 
-// ===== KHAI BÁO HÀM =====
+// ===== KHAI BÁO HÀM & MACRO =====
 extern void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex);
 extern void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex);
 
@@ -22,6 +22,12 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 #ifndef ENCRYPTOFFSET
 #define ENCRYPTOFFSET(hexStr) ((uintptr_t)strtoull((hexStr) + 2, NULL, 16))
+#endif
+
+// ✅ SỬA: Định nghĩa macro HOOK — dùng DobbyHook trực tiếp
+#ifndef HOOK
+#define HOOK(addrVar, origFuncPtr, newFunc) \
+    DobbyHook((void*)UF(addrVar), (void*)newFunc, (void**)&origFuncPtr)
 #endif
 
 #define OBFUSCATE(s) (s)
@@ -102,7 +108,6 @@ void highrate(void* _this) { if (_highrate) _highrate(_this); }
 // ========== ÁP DỤNG ANTIBAN TỰ ĐỘNG ==========
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
-    // 0x5F88E3C — 2 lần trong danh sách
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x4C3E394, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x6C46CFC, "0x000080D2C0035FD6");
@@ -117,29 +122,25 @@ static void* hack_thread(void*) {
     do { il2cppBase = get_lib_base("UnityFramework"); usleep(500000); } while (!il2cppBase);
     LOGI(@"UnityFramework OK");
     
-    // ✅ Tự áp dụng AntiBan ngay
     ApplyAntiBanPatches();
     
     sleep(2);
     dispatch_async(dispatch_get_main_queue(), ^{
-        // Hook camera
-        HOOK(ENCRYPTOFFSET("0x51C4048"), _cam, cam);
-        HOOK(ENCRYPTOFFSET("0x51C2C04"), _Update, Update);
-        HOOK(ENCRYPTOFFSET("0x51C46A0"), _highrate, highrate);
+        // ✅ SỬA: Dùng số trực tiếp thay vì ENCRYPTOFFSET trong macro
+        DobbyHook((void*)UF(0x51C4048), (void*)cam, (void**)&_cam);
+        DobbyHook((void*)UF(0x51C2C04), (void*)Update, (void**)&_Update);
+        DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
         LOGI(@"✅ Camera hooks đã sẵn sàng");
     });
     return nullptr;
 }
 
 // ========== IMPLEMENTATION ==========
-@interface ImGuiDrawView () <MTKViewDelegate>
-@property (nonatomic, strong) MTKView *mtkView;
-@property (nonatomic, assign) BOOL touchDown;
-@end
-
 @implementation ImGuiDrawView
 
+// ✅ SỬA: Thêm hàm showChange bị thiếu trong .h
 + (void)showMenu:(BOOL)open { MenDeal = open; }
++ (void)showChange:(BOOL)open { MenDeal = open; }
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
     if (!(self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil])) return nil;
@@ -166,6 +167,7 @@ static void* hack_thread(void*) {
     self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     self.mtkView.opaque = NO;
     self.mtkView.userInteractionEnabled = YES;
+    self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.mtkView];
 }
 
@@ -176,17 +178,17 @@ static void* hack_thread(void*) {
     if (MenDeal) {
         ImGuiIO& io = ImGui::GetIO();
         io.MousePos = ImVec2(p.x, p.y);
-        io.MouseDown[0] = _touchDown = YES;
+        io.MouseDown[0] = YES;
         return;
     }
     [super touchesBegan:touches withEvent:event];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (!MenDeal || !_touchDown) { [super touchesMoved:touches withEvent:event]; return; }
+    if (!MenDeal) { [super touchesMoved:touches withEvent:event]; return; }
     ImGui::GetIO().MousePos = ImVec2([[touches anyObject] locationInView:self.view].x, [[touches anyObject] locationInView:self.view].y);
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (MenDeal) { ImGui::GetIO().MouseDown[0] = _touchDown = NO; return; }
+    if (MenDeal) { ImGui::GetIO().MouseDown[0] = NO; return; }
     [super touchesEnded:touches withEvent:event];
 }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self touchesEnded:touches withEvent:event]; }
