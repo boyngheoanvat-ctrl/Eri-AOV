@@ -12,10 +12,17 @@
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
 
-// ===== KHAI BÁO =====
+// ===== KHAI BÁO HÀM =====
+extern void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex);
+extern void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex);
+
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
+
+#ifndef ENCRYPTOFFSET
+#define ENCRYPTOFFSET(hexStr) ((uintptr_t)strtoull((hexStr) + 2, NULL, 16))
+#endif
 
 #define OBFUSCATE(s) (s)
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
@@ -26,24 +33,40 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 using namespace IL2CPP;
 
-// ========== BIẾN ==========
-bool featureHookToggle = false;
-uintptr_t il2cppBase = 0;
+// ========== BIẾN TOÀN CỤC ==========
 bool MenDeal = false;
+
+// Camera
+bool camHookActive = false;
 float SetFieldOfView = 6.0f;
 
-bool ESP_Enable = false;
-bool ESP_ShowName = true;
-bool ESP_ShowDistance = true;
-bool ESP_ShowBox = true;
-bool ESP_ShowLine = true;
+// Show Ult
+bool showUltActive = false;
+static bool s_ultApplied = false;
+
+// Map
+bool mapActive = false;
+static bool s_mapApplied = false;
+
+// Cam Xa 3 Nấc
+bool camXaActive = false;
+static bool s_camXaApplied = false;
+
+// Cam Kéo — dùng HOOK
+typedef float (*fn_cam)(void* _this, int type);
+static fn_cam _cam = nullptr;
+typedef void (*fn_Update)(void* _this);
+static fn_Update _Update = nullptr;
+typedef void (*fn_highrate)(void* _this);
+static fn_highrate _highrate = nullptr;
+
+static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
 
 // ========== LẤY BASE ==========
-static const char* kTargetLibName = OBFUSCATE("UnityFramework");
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
-    uint32_t imageCount = _dyld_image_count();
-    for (uint32_t i = 0; i < imageCount; i++) {
+    uint32_t cnt = _dyld_image_count();
+    for (uint32_t i = 0; i < cnt; i++) {
         const char* name = _dyld_get_image_name(i);
         if (!name) continue;
         if (strstr(name, libName) || strstr(name, "UnityFramework")) {
@@ -54,88 +77,69 @@ uintptr_t get_lib_base(const char* libName) {
     return base;
 }
 
-static bool PatchMemory(void* addr, const void* data, size_t len) {
-    vm_prot_t old;
-    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
-        return false;
-    memcpy(addr, data, len);
-    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
-}
-
+static uintptr_t il2cppBase = 0;
 static uintptr_t UF(uintptr_t rva) {
-    if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
+    if (!il2cppBase) il2cppBase = get_lib_base("UnityFramework");
     return il2cppBase ? il2cppBase + rva : 0;
 }
 
-// ============= CAMERA HOOK =============
-typedef float (*fn_GetCameraHeightRateValue)(void* _this, int type);
-fn_GetCameraHeightRateValue orig_GetCameraHeightRateValue = nullptr;
-float hook_GetCameraHeightRateValue(void* _this, int type) {
-    if (!orig_GetCameraHeightRateValue) return 0.0f;
-    return featureHookToggle ? SetFieldOfView : orig_GetCameraHeightRateValue(_this, type);
+// ========== HÀM ÁP DỤNG / KHÔI PHỤC ==========
+static void ApplyPatch(uintptr_t rva, const char* hex) {
+    Hook1110(kFW, rva, hex);
+}
+static void RestorePatch(uintptr_t rva, const char* hex) {
+    DeactiveCodePatch(kFW, rva, hex);
 }
 
-typedef void (*fn_Update)(void* _this);
-fn_Update orig_Update = nullptr;
-void hook_Update(void* _this) { if (orig_Update) orig_Update(_this); }
+// ========== CAMERA HOOK ==========
+float cam(void* _this, int type) {
+    if (!_cam) return 0.0f;
+    return camHookActive ? SetFieldOfView : _cam(_this, type);
+}
+void Update(void* _this) { if (_Update) _Update(_this); }
+void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
-typedef void (*fn_OnCameraHeightChanged)(void* _this);
-fn_OnCameraHeightChanged orig_OnCameraHeightChanged = nullptr;
-void hook_OnCameraHeightChanged(void* _this) { if (orig_OnCameraHeightChanged) orig_OnCameraHeightChanged(_this); }
+// ========== ÁP DỤNG ANTIBAN TỰ ĐỘNG ==========
+static void ApplyAntiBanPatches() {
+    LOGI(@"=== ÁP DỤNG ANTIBAN ===");
+    // 0x5F88E3C — 2 lần trong danh sách
+    DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
+    DeactiveCodePatch(kFW, 0x4C3E394, "0xC0035FD61F2003D51F2003D5");
+    DeactiveCodePatch(kFW, 0x6C46CFC, "0x000080D2C0035FD6");
+    DeactiveCodePatch(kFW, 0x6C46220, "0xC0035FD61F2003D51F2003D5");
+    DeactiveCodePatch(kFW, 0x6C45E70, "0x000080D2C0035FD6");
+    DeactiveCodePatch(kFW, 0x6C462B8, "0x000080D2C0035FD6");
+    LOGI(@"✅ AntiBan đã áp dụng tự động");
+}
 
-// ============= HOOK THREAD =============
+// ========== HOOK THREAD ==========
 static void* hack_thread(void*) {
-    do { il2cppBase = get_lib_base(kTargetLibName); usleep(500000); } while (!il2cppBase);
+    do { il2cppBase = get_lib_base("UnityFramework"); usleep(500000); } while (!il2cppBase);
     LOGI(@"UnityFramework OK");
-    sleep(3);
+    
+    // ✅ Tự áp dụng AntiBan ngay
+    ApplyAntiBanPatches();
+    
+    sleep(2);
     dispatch_async(dispatch_get_main_queue(), ^{
-        void* pGetCam = (void*)UF(0x51C4048);
-        void* pUpdate = (void*)UF(0x51C2C04);
-        void* pOnCam  = (void*)UF(0x51C46A0);
-        if (pGetCam && !orig_GetCameraHeightRateValue)
-            DobbyHook(pGetCam, (void*)hook_GetCameraHeightRateValue, (void**)&orig_GetCameraHeightRateValue);
-        if (pUpdate && !orig_Update)
-            DobbyHook(pUpdate, (void*)hook_Update, (void**)&orig_Update);
-        if (pOnCam && !orig_OnCameraHeightChanged)
-            DobbyHook(pOnCam, (void*)hook_OnCameraHeightChanged, (void**)&orig_OnCameraHeightChanged);
+        // Hook camera
+        HOOK(ENCRYPTOFFSET("0x51C4048"), _cam, cam);
+        HOOK(ENCRYPTOFFSET("0x51C2C04"), _Update, Update);
+        HOOK(ENCRYPTOFFSET("0x51C46A0"), _highrate, highrate);
+        LOGI(@"✅ Camera hooks đã sẵn sàng");
     });
     return nullptr;
 }
 
-// ============= ESP =============
-static void DrawESP() {
-    if (!ESP_Enable || !il2cppBase) return;
-    ImDrawList* drawList = ImGui::GetForegroundDrawList();
-    if (!drawList) return;
-    static float demoAngle = 0.0f; demoAngle += 0.02f;
-    ImVec2 center = ImVec2(kWidth/2, kHeight/2);
-    float pos[3][2] = {
-        {center.x + cosf(demoAngle)*200, center.y + sinf(demoAngle)*150},
-        {center.x + cosf(demoAngle+2.094f)*250, center.y + sinf(demoAngle+2.094f)*180},
-        {center.x + cosf(demoAngle+4.188f)*180, center.y + sinf(demoAngle+4.188f)*220}
-    };
-    const char* names[3] = {"Enemy 1", "Enemy 2", "Enemy 3"};
-    float dists[3] = {15.5f, 22.3f, 18.7f};
-    for (int i=0; i<3; i++) {
-        ImVec2 p = ImVec2(pos[i][0], pos[i][1]);
-        if (ESP_ShowLine) drawList->AddLine(center, p, IM_COL32(255,50,50,200), 2);
-        if (ESP_ShowBox) drawList->AddRect(ImVec2(p.x-30,p.y-45), ImVec2(p.x+30,p.y+45), IM_COL32(255,50,50,220), 0, 0, 2);
-        if (ESP_ShowName) { char b[64]; snprintf(b,64,"%s",names[i]); drawList->AddText(ImVec2(p.x-25,p.y-60), IM_COL32_WHITE, b); }
-        if (ESP_ShowDistance) { char b[64]; snprintf(b,64,"%.1fm",dists[i]); drawList->AddText(ImVec2(p.x-20,p.y+50), IM_COL32(100,255,100,255), b); }
-    }
-}
-
-// ============= IMPLEMENTATION =============
+// ========== IMPLEMENTATION ==========
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
-@property (nonatomic, assign) CGPoint lastTouchPos;
 @property (nonatomic, assign) BOOL touchDown;
 @end
 
 @implementation ImGuiDrawView
 
 + (void)showMenu:(BOOL)open { MenDeal = open; }
-+ (void)showChange:(BOOL)open { MenDeal = open; }
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
     if (!(self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil])) return nil;
@@ -147,14 +151,12 @@ static void DrawESP() {
     _device = MTLCreateSystemDefaultDevice();
     _cmdQueue = [_device newCommandQueue];
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
     ImGui::StyleColorsDark();
+    ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
     ImGui_ImplMetal_Init(_device);
     pthread_t th; pthread_create(&th, nullptr, hack_thread, nullptr); pthread_detach(th);
 }
-
-- (void)loadView { self.view = [[UIView alloc] initWithFrame:[UIScreen mainScreen].bounds]; }
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -163,58 +165,31 @@ static void DrawESP() {
     self.mtkView.delegate = self;
     self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     self.mtkView.opaque = NO;
-    self.mtkView.userInteractionEnabled = YES; // ✅ Luôn nhận chạm
-    self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    self.mtkView.userInteractionEnabled = YES;
     [self.view addSubview:self.mtkView];
 }
 
-#pragma mark - ✅ NỐI CHẠM VÀO IMGUI — CHÍNH LÀ ĐÂY
+#pragma mark - XỬ LÝ CHẠM
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint p = [[touches anyObject] locationInView:self.view];
-    
-    // 3 ngón → bật/tắt menu
-    if (touches.count >= 3) {
-        MenDeal = !MenDeal;
-        LOGI(@"Menu: %@", MenDeal ? @"HIỆN" : @"ẨN");
-        return;
-    }
-    
-    // Menu hiện → gửi chạm vào ImGui
+    if (touches.count >= 3) { MenDeal = !MenDeal; return; }
     if (MenDeal) {
         ImGuiIO& io = ImGui::GetIO();
         io.MousePos = ImVec2(p.x, p.y);
-        io.MouseDown[0] = true; // ✅ Nhấn chuột trái = chạm màn hình
-        _touchDown = YES;
-        _lastTouchPos = p;
-        return; // ✅ Không chuyển xuống game
+        io.MouseDown[0] = _touchDown = YES;
+        return;
     }
-    
     [super touchesBegan:touches withEvent:event];
 }
-
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    CGPoint p = [[touches anyObject] locationInView:self.view];
-    if (MenDeal && _touchDown) {
-        ImGuiIO& io = ImGui::GetIO();
-        io.MousePos = ImVec2(p.x, p.y);
-        return;
-    }
-    if (!MenDeal) [super touchesMoved:touches withEvent:event];
+    if (!MenDeal || !_touchDown) { [super touchesMoved:touches withEvent:event]; return; }
+    ImGui::GetIO().MousePos = ImVec2([[touches anyObject] locationInView:self.view].x, [[touches anyObject] locationInView:self.view].y);
 }
-
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (MenDeal) {
-        ImGuiIO& io = ImGui::GetIO();
-        io.MouseDown[0] = false; // ✅ Nhả chuột
-        _touchDown = NO;
-        return;
-    }
+    if (MenDeal) { ImGui::GetIO().MouseDown[0] = _touchDown = NO; return; }
     [super touchesEnded:touches withEvent:event];
 }
-
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self touchesEnded:touches withEvent:event];
-}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self touchesEnded:touches withEvent:event]; }
 
 #pragma mark - RENDER
 - (void)drawInMTKView:(MTKView *)view {
@@ -234,48 +209,76 @@ static void DrawESP() {
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
-    DrawESP();
-
     if (MenDeal) {
         ImGui::SetNextWindowSizeConstraints(ImVec2(280,200), ImVec2(kWidth*0.95f, kHeight*0.9f));
         if (ImGui::Begin("Menu AOV", &MenDeal)) {
             if (ImGui::BeginTabBar("TabBar")) {
-                if (ImGui::BeginTabItem("Camera")) {
-                    ImGui::Checkbox("Enable Hook", &featureHookToggle);
-                    ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f);
+                
+                // === CAM KÉO ===
+                if (ImGui::BeginTabItem("Cam Kéo")) {
+                    ImGui::Checkbox("Kéo Camera", &camHookActive);
+                    ImGui::SliderFloat("FOV", &SetFieldOfView, 0.1f, 15.0f);
                     ImGui::EndTabItem();
                 }
-                if (ImGui::BeginTabItem("ESP")) {
-                    ImGui::Checkbox("Enable ESP", &ESP_Enable);
-                    ImGui::Separator();
-                    ImGui::Checkbox("Show Name", &ESP_ShowName);
-                    ImGui::Checkbox("Show Distance", &ESP_ShowDistance);
-                    ImGui::Checkbox("Show Box", &ESP_ShowBox);
-                    ImGui::Checkbox("Show Line", &ESP_ShowLine);
+                
+                // === CAM XA 3 NẤC ===
+                if (ImGui::BeginTabItem("Cam Xa")) {
+                    bool newCamXa = camXaActive;
+                    if (ImGui::Checkbox("Cam Xa 3 Nấc", &newCamXa)) {
+                        if (newCamXa != camXaActive) {
+                            camXaActive = newCamXa;
+                            if (camXaActive) {
+                                ApplyPatch(0x525BE48, "0x20008052C0035FD6");
+                                s_camXaApplied = true;
+                            } else if (s_camXaApplied) {
+                                RestorePatch(0x525BE48, "0x20008052C0035FD6");
+                                s_camXaApplied = false;
+                            }
+                        }
+                    }
                     ImGui::EndTabItem();
                 }
+                
+                // === SHOW ULT ===
                 if (ImGui::BeginTabItem("Show Ult")) {
-                    static bool su=false, wasSu=false;
-                    ImGui::Checkbox("Show Enemy Skill", &su);
-                    if (su!=wasSu && il2cppBase) {
-                        uint32_t on=0x52800020, off=0xD50320C0;
-                        PatchMemory((void*)UF(0x5BA7218), su?&on:&off,4);
-                        PatchMemory((void*)UF(0x6660B80), su?&on:&off,4);
-                        PatchMemory((void*)UF(0x6660A1C), su?&on:&off,4);
-                        wasSu=su;
+                    bool newUlt = showUltActive;
+                    if (ImGui::Checkbox("Hiện Kỹ Năng", &newUlt)) {
+                        if (newUlt != showUltActive) {
+                            showUltActive = newUlt;
+                            if (showUltActive) {
+                                ApplyPatch(0x5BA7218, "0x20008052C0035FD6");
+                                ApplyPatch(0x6660B80, "0x20008052C0035FD6");
+                                ApplyPatch(0x6660A1C, "0x20008052C0035FD6");
+                                s_ultApplied = true;
+                            } else if (s_ultApplied) {
+                                RestorePatch(0x5BA7218, "0x20008052C0035FD6");
+                                RestorePatch(0x6660B80, "0x20008052C0035FD6");
+                                RestorePatch(0x6660A1C, "0x20008052C0035FD6");
+                                s_ultApplied = false;
+                            }
+                        }
                     }
                     ImGui::EndTabItem();
                 }
+                
+                // === MAP ===
                 if (ImGui::BeginTabItem("Map")) {
-                    static bool mp=false, wasMp=false;
-                    ImGui::Checkbox("Enable Map", &mp);
-                    if (mp!=wasMp && il2cppBase) {
-                        uint32_t on=0xD2800036, off=0xD50320C0;
-                        PatchMemory((void*)UF(0x4826BB8), mp?&on:&off,4);
-                        wasMp=mp;
+                    bool newMap = mapActive;
+                    if (ImGui::Checkbox("Map Toàn Cục", &newMap)) {
+                        if (newMap != mapActive) {
+                            mapActive = newMap;
+                            if (mapActive) {
+                                ApplyPatch(0x4826BB8, "0x360080D2");
+                                s_mapApplied = true;
+                            } else if (s_mapApplied) {
+                                RestorePatch(0x4826BB8, "0x360080D2");
+                                s_mapApplied = false;
+                            }
+                        }
                     }
                     ImGui::EndTabItem();
                 }
+                
                 ImGui::EndTabBar();
             }
             ImGui::End();
