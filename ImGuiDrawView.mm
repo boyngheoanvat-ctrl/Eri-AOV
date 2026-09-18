@@ -123,10 +123,10 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
             HOOK(setVisibleOffset, hook_SetVisible, orig_SetVisible);
         }
 
-        // ========== CAMERA HOOK — ĐÚNG OFFSET BẠN CUNG CẤP ==========
-        HOOK(ENCRYPTOFFSET("0x51C4048"), _cam, cam);
-        HOOK(ENCRYPTOFFSET("0x51C2C04"), _Update, Update);
-        HOOK(ENCRYPTOFFSET("0x51C46A0"), _highrate, highrate);
+        // ========== CAMERA HOOK — SỬA: BỎ ENCRYPTOFFSET ==========
+        HOOK((uint64_t)0x51C4048, _cam, cam);
+        HOOK((uint64_t)0x51C2C04, _Update, Update);
+        HOOK((uint64_t)0x51C46A0, _highrate, highrate);
         
     } @catch (NSException *e) {
         NSLog(@"Hook lỗi: %@", e);
@@ -220,64 +220,74 @@ bool hook_SetVisible(void* self, int camp, bool bVisible, bool forceSync) {
         ImGui::End();
     }
 
-    // ========== PATCH — TỰ ĐỘNG BẬT/TẮT THEO CHECKBOX ==========
-    static const char* fw = "Frameworks/UnityFramework.framework/UnityFramework";
+    // ========== PATCH — SỬA: CHUYỂN KIỂU CHAR* ==========
+    static char fw[] = "Frameworks/UnityFramework.framework/UnityFramework";
     
     // ANTIBAN — LUÔN BẬT
-    ActiveCodePatch(fw, 0x5F88E3C,   "C0035FD61F2003D51F2003D5");
-    ActiveCodePatch(fw, 0x4C3E394,   "C0035FD61F2003D51F2003D5");
-    ActiveCodePatch(fw, 0x6C46CFC,   "000080D2C0035FD6");
-    ActiveCodePatch(fw, 0x6C46220,   "C0035FD61F2003D51F2003D5");
-    ActiveCodePatch(fw, 0x6C45E70,   "000080D2C0035FD61F2003D51F2003D5");
-    ActiveCodePatch(fw, 0x6C462B8,   "000080D2C0035FD6");
+    { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x5F88E3C, p); }
+    { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x4C3E394, p); }
+    { char p[] = "000080D2C0035FD6";        ActiveCodePatch(fw, 0x6C46CFC, p); }
+    { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x6C46220, p); }
+    { char p[] = "000080D2C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x6C45E70, p); }
+    { char p[] = "000080D2C0035FD6";        ActiveCodePatch(fw, 0x6C462B8, p); }
     
     // CAM XA
     static bool camActive = false;
     if (lockcam && !camActive) {
-        ActiveCodePatch(fw, 0x525BE48, "20008052C0035FD6");
+        char p[] = "20008052C0035FD6";
+        ActiveCodePatch(fw, 0x525BE48, p);
         camActive = true;
     } else if (!lockcam && camActive) {
-        DeactiveCodePatch(fw, 0x525BE48, "20008052C0035FD6");
+        char p[] = "20008052C0035FD6";
+        DeactiveCodePatch(fw, 0x525BE48, p);
         camActive = false;
     }
     
     // SHOW ULT
     static bool ultActive = false;
     if (ShowUlt && !ultActive) {
-        ActiveCodePatch(fw, 0x5BA7218, "20008052C0035FD6");
+        char p[] = "20008052C0035FD6";
+        ActiveCodePatch(fw, 0x5BA7218, p);
         ultActive = true;
     } else if (!ShowUlt && ultActive) {
-        DeactiveCodePatch(fw, 0x5BA7218, "20008052C0035FD6");
+        char p[] = "20008052C0035FD6";
+        DeactiveCodePatch(fw, 0x5BA7218, p);
         ultActive = false;
     }
     
     // SHOW HP
     static bool hpActive = false;
     if (ShowHP && !hpActive) {
-        ActiveCodePatch(fw, 0x6660A1C, "20008052C0035FD6");
+        char p[] = "20008052C0035FD6";
+        ActiveCodePatch(fw, 0x6660A1C, p);
         hpActive = true;
     } else if (!ShowHP && hpActive) {
-        DeactiveCodePatch(fw, 0x6660A1C, "20008052C0035FD6");
+        char p[] = "20008052C0035FD6";
+        DeactiveCodePatch(fw, 0x6660A1C, p);
         hpActive = false;
     }
     
     // SHOW NAME / RANK
-    static bool rankActive = false;
-    if (ShowName && !rankActive) {
-        ActiveCodePatch(fw, 0x6660B80, "20008052C0035FD6");
-        rankActive = true;
-    } else if (!ShowName && rankActive) {
-        DeactiveCodePatch(fw, 0x6660B80, "20008052C0035FD6");
-        rankActive = false;
+    static bool nameActive = false;
+    if (ShowName && !nameActive) {
+        char p[] = "20008052C0035FD6";
+        ActiveCodePatch(fw, 0x6660B80, p);
+        nameActive = true;
+    } else if (!ShowName && nameActive) {
+        char p[] = "20008052C0035FD6";
+        DeactiveCodePatch(fw, 0x6660B80, p);
+        nameActive = false;
     }
     
     // MAP
     static bool mapActive = false;
     if (Map && !mapActive) {
-        ActiveCodePatch(fw, 0x4826BB8, "360080D2");
+        char p[] = "360080D2";
+        ActiveCodePatch(fw, 0x4826BB8, p);
         mapActive = true;
     } else if (!Map && mapActive) {
-        DeactiveCodePatch(fw, 0x4826BB8, "360080D2");
+        char p[] = "360080D2";
+        DeactiveCodePatch(fw, 0x4826BB8, p);
         mapActive = false;
     }
 
