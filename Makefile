@@ -1,7 +1,9 @@
 ARCHS = arm64
-# Sử dụng SDK có sẵn — không ghi số phiên bản cụ thể
-SDKVERSION = iphoneos
-TARGET = iphone:clang:15.0:14.0
+
+# Tự động lấy SDK có sẵn mới nhất
+SDKVERSION := $(notdir $(patsubst %/,%,$(dir $(firstword $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk/)))))
+SDKVERSION := $(patsubst iPhoneOS%,%,$(SDKVERSION))
+TARGET := iphone:clang:$(SDKVERSION):14.0
 
 INSTALL_TARGET_PROCESSES = com.nguyen.AOV
 
@@ -25,7 +27,7 @@ TWEAK_NAME = 34306jit
 34306jit_CFLAGS = -std=c++17 -fobjc-arc
 34306jit_FRAMEWORKS = UIKit Metal MetalKit
 
-# Tự cài Dobby nếu chưa có
+# Tự cài Dobby
 before-all::
 	@if [ ! -f "$(THEOS)/lib/libdobby.a" ]; then \
 		echo "==> Building Dobby..."; \
@@ -34,7 +36,7 @@ before-all::
 		mkdir -p $(THEOS)/lib $(THEOS)/include/dobby; \
 		cp /tmp/Dobby/libdobby.a $(THEOS)/lib/; \
 		cp /tmp/Dobby/include/*.h $(THEOS)/include/dobby/; \
-		echo "==> Dobby installed"; \
+		echo "==> Dobby ready"; \
 	fi
 
 include theos/makefiles/tweak.mk
