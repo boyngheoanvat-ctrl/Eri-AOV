@@ -1,8 +1,10 @@
 name: Build Tweak
+
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -10,7 +12,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: theos/github-action@main
+
+      - uses: Randomblock1/theos-action@v1
         with:
           sdk: iphoneos15.2
           make-args: clean package
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: 34306jit
+          path: packages/*.deb
+          retention-days: 7
