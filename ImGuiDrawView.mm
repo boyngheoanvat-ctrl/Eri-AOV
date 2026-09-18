@@ -4,12 +4,17 @@
 #import <Foundation/Foundation.h>
 #import <mach/mach.h>
 #import <mach/vm_map.h>
-#import <dyld/dyld_images.h>
+#include <mach-o/loader.h>
 #import "5Toubun/dobby.h"
 #import "IMGUI/imgui.h"
 #import "IMGUI/imgui_impl_metal.h"
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
+
+// ===== KHAI BÁO HÀM DYLD — KHÔNG CẦN HEADER =====
+extern uint32_t _dyld_image_count(void);
+extern const char* _dyld_get_image_name(uint32_t image_index);
+extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 // ===== MACRO OBFUSCATE =====
 #define OBFUSCATE_IMPL2(x, y) x##y
@@ -30,8 +35,7 @@ bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
 
-// ========== HÀM LẤY ĐỊA CHỈ BASE — PHIÊN BẢN iOS ==========
-// Thay /proc/self/maps bằng dyld API — phù hợp với iOS
+// ========== HÀM LẤY ĐỊA CHỈ BASE — ĐÃ SỬA KHÔNG CẦN HEADER DYLD =====
 static const char* kTargetLibName = OBFUSCATE("UnityFramework");
 
 uintptr_t get_lib_base(const char* libName) {
@@ -44,7 +48,6 @@ uintptr_t get_lib_base(const char* libName) {
             base = (uintptr_t)_dyld_get_image_header(i);
             break;
         }
-        // Thử tên rút gọn
         if (strstr(name, "UnityFramework") && !base) {
             base = (uintptr_t)_dyld_get_image_header(i);
         }
@@ -72,7 +75,7 @@ typedef float (*fn_GetCamHeight)(void*);
 fn_GetCamHeight orig_GetCamHeight = nullptr;
 float hook_GetCamHeight(void* _this) {
     if (featureHookToggle) {
-        return 6.0f; // Giá trị tùy chỉnh khi bật hook
+        return 6.0f;
     }
     return orig_GetCamHeight ? orig_GetCamHeight(_this) : 2.0f;
 }
@@ -89,24 +92,22 @@ void hook_OnCamChanged(void* _this) {
     if (orig_OnCamChanged) orig_OnCamChanged(_this);
 }
 
-// ========== HOOK THREAD — CHỜ LIB NẠP XONG ==========
+// ========== HOOK THREAD ==========
 static void* hack_thread(void*) {
     LOGI(@"Hack thread started. Searching for UnityFramework...");
 
-    // Chờ lib được nạp — tương tự logic Android nhưng dùng API iOS
     do {
         il2cppBase = get_lib_base(kTargetLibName);
         if (il2cppBase == 0) {
             il2cppBase = get_lib_base("UnityFramework");
         }
-        usleep(500000); // 0.5s
+        usleep(500000);
     } while (il2cppBase == 0);
 
     LOGI(@"✅ UnityFramework tìm thấy tại: 0x%lx", il2cppBase);
 
-    // === Bắt đầu Hook ===
     dispatch_async(dispatch_get_main_queue(), ^{
-        uintptr_t rva_GetCam = 0x51C4048;   // Thay RVA thực tế!
+        uintptr_t rva_GetCam = 0x51C4048;
         uintptr_t rva_Update  = 0x51C2C04;
         uintptr_t rva_OnCam   = 0x51C46A0;
 
@@ -138,7 +139,6 @@ static void* hack_thread(void*) {
     io.Fonts->AddFontFromMemoryCompressedTTF((void*)zzz_compressed_data, zzz_compressed_size, 18);
     ImGui_ImplMetal_Init(_device);
 
-    // Khởi động thread chờ lib
     pthread_t th;
     pthread_create(&th, nullptr, hack_thread, nullptr);
     pthread_detach(th);
@@ -191,14 +191,12 @@ static void* hack_thread(void*) {
     if (MenDeal && ImGui::Begin("Menu AOV", &MenDeal)) {
         if (ImGui::BeginTabBar("TabBar")) {
             
-            // === CAMERA / FEATURE TOGGLE ===
             if (ImGui::BeginTabItem("Camera")) {
                 static bool wasToggle = false;
                 ImGui::Checkbox("🔒 Bật/Tắt Hook", &featureHookToggle);
                 static float fovValue = 6.0f;
                 ImGui::SliderFloat("📐 Độ cao FOV", &fovValue, 0.1f, 15.0f);
                 if (featureHookToggle) {
-                    // Cập nhật giá trị FOV khi bật
                     extern float SetFieldOfView;
                     SetFieldOfView = fovValue;
                 }
@@ -210,7 +208,6 @@ static void* hack_thread(void*) {
                 ImGui::EndTabItem();
             }
             
-            // === SHOW ULT ĐỊCH ===
             if (ImGui::BeginTabItem("Show Ult")) {
                 static bool ShowUlt = false;
                 static bool wasUlt = false;
@@ -226,7 +223,6 @@ static void* hack_thread(void*) {
                 ImGui::EndTabItem();
             }
             
-            // === MAP ===
             if (ImGui::BeginTabItem("Map")) {
                 static bool Map = false;
                 static bool wasMap = false;
