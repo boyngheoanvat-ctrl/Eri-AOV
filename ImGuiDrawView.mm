@@ -2,12 +2,10 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <Foundation/Foundation.h>
-#import "Esp/CaptainHook.h"
-#import "Esp/ImGuiDrawView.h"
+#include "dobby.h"
 #import "IMGUI/imgui.h"
 #import "IMGUI/imgui_impl_metal.h"
 #import "IMGUI/zzz.h"
-#include "1110/patch.h"
 #import "il2cpp.h"
 
 #define kWidth  [UIScreen mainScreen].bounds.size.width
@@ -16,29 +14,67 @@
 
 using namespace IL2CPP;
 
-// ========== BIẾN ==========
+// ========== BIẾN TOÀN CỤC ==========
 bool lockcam = false;
 float SetFieldOfView = 2.0f;
 bool ShowUlt = false;
 bool Map = false;
 bool MenDeal = true;
 
+// ========== HÀM TRỢ GIÚP — LẤY ĐỊA CHỈ DỰA TRÊN BASE ==========
+static void* GetImageBase(const char* name) {
+    void* h = dlopen(name, RTLD_LAZY);
+    if (!h) return nullptr;
+    return dlsym(h, "_mh_execute_header");
+}
+
+static uintptr_t g_ufBase = 0;
+static uintptr_t UF(uintptr_t rva) {
+    if (!g_ufBase) g_ufBase = (uintptr_t)GetImageBase("/Frameworks/UnityFramework.framework/UnityFramework");
+    return g_ufBase + rva;
+}
+
 // ========== CAMERA HOOK ==========
-float(*orig_GetCamHeight)(void* _this);
+typedef float (*fn_GetCamHeight)(void*);
+fn_GetCamHeight orig_GetCamHeight = nullptr;
 float hook_GetCamHeight(void* _this) {
     if (lockcam) return SetFieldOfView;
-    return orig_GetCamHeight(_this);
+    return orig_GetCamHeight ? orig_GetCamHeight(_this) : 0.0f;
 }
 
-void (*orig_Update)(void* _this);
+typedef void (*fn_Update)(void*);
+fn_Update orig_Update = nullptr;
 void hook_Update(void* _this) {
-    if (lockcam) return; // bỏ gọi gốc khi khóa
-    if (orig_Update) orig_Update(_this);
+    if (!lockcam && orig_Update) orig_Update(_this);
 }
 
-void (*orig_OnCamChanged)(void* _this);
+typedef void (*fn_OnCamChanged)(void*);
+fn_OnCamChanged orig_OnCamChanged = nullptr;
 void hook_OnCamChanged(void* _this) {
     if (orig_OnCamChanged) orig_OnCamChanged(_this);
+}
+
+// ========== PATCH BYTES — Ghi trực tiếp vào bộ nhớ ==========
+#include <mach/mach.h>
+#include <mach/vm_map.h>
+
+static bool PatchMemory(void* addr, const void* data, size_t len) {
+    vm_prot_t old;
+    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
+        return false;
+    memcpy(addr, data, len);
+    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
+}
+
+static uint32_t Hex2U32(const char* hex) {
+    char buf[9] = {0};
+    strncpy(buf, hex, 8);
+    return (uint32_t)strtoul(buf, nullptr, 16);
+}
+
+static bool PatchARM64(uintptr_t rva, const char* hex) {
+    uint32_t insn = Hex2U32(hex);
+    return PatchMemory((void*)UF(rva), &insn, 4);
 }
 
 @interface ImGuiDrawView () <MTKViewDelegate>
@@ -71,18 +107,14 @@ void hook_OnCamChanged(void* _this) {
     self.mtkView.delegate = self;
     self.mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     
-    // === HOOK IL2CPP ===
-    @try {
-        void Il2CppAttachOld(void);
-        Il2CppAttachOld();
-        
-        // Kiểm tra offset chính xác — nếu vẫn không chạy, gửi mình lại RVA đúng từ file bạn
-        HOOK((uint64_t)0x51C4048, hook_GetCamHeight, orig_GetCamHeight);
-        HOOK((uint64_t)0x51C2C04, hook_Update, orig_Update);
-        HOOK((uint64_t)0x51C46A0, hook_OnCamChanged, orig_OnCamChanged);
-    } @catch (NSException *e) {
-        NSLog(@"Hook Error: %@", e);
-    }
+    // === GẮN HOOK BẰNG DOBBY — KHÔNG DÙNG MACRO CŨ ===
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // Camera
+        DobbyHook((void*)UF(0x51C4048), (void*)hook_GetCamHeight, (void**)&orig_GetCamHeight);
+        DobbyHook((void*)UF(0x51C2C04), (void*)hook_Update, (void**)&orig_Update);
+        DobbyHook((void*)UF(0x51C46A0), (void*)hook_OnCamChanged, (void**)&orig_OnCamChanged);
+        NSLog(@"✅ Hook thành công!");
+    });
 }
 
 #pragma mark - Touch
@@ -119,82 +151,52 @@ void hook_OnCamChanged(void* _this) {
             
             // === CAMERA ===
             if (ImGui::BeginTabItem("Camera")) {
+                static bool wasLock = false;
                 ImGui::Checkbox("🔒 Khóa Camera", &lockcam);
                 ImGui::SliderFloat("📐 Độ Cao", &SetFieldOfView, 0.1f, 10.0f);
+                if (lockcam != wasLock) {
+                    // Khi bật/tắt → patch/nop trực tiếp
+                    uint32_t pOn  = 0x52800020; // mov w0, #0x20; ret
+                    uint32_t pOff = 0xD50320C0; // ret
+                    PatchMemory((void*)UF(0x525BE48), lockcam ? &pOn : &pOff, 4);
+                    wasLock = lockcam;
+                }
                 ImGui::TextDisabled("RVA: 0x525BE48");
                 ImGui::EndTabItem();
             }
             
             // === SHOW ULTR ĐỊCH ===
             if (ImGui::BeginTabItem("Show Ult Địch")) {
+                static bool wasUlt = false;
                 ImGui::Checkbox("👁️ Hiện Kỹ Năng Địch", &ShowUlt);
+                if (ShowUlt != wasUlt) {
+                    uint32_t pOn  = 0x52800020;
+                    uint32_t pOff = 0xD50320C0;
+                    PatchMemory((void*)UF(0x5BA7218), ShowUlt ? &pOn : &pOff, 4);
+                    PatchMemory((void*)UF(0x6660B80), ShowUlt ? &pOn : &pOff, 4);
+                    PatchMemory((void*)UF(0x6660A1C), ShowUlt ? &pOn : &pOff, 4);
+                    wasUlt = ShowUlt;
+                }
                 ImGui::TextDisabled("0x5BA7218 | 0x6660B80 | 0x6660A1C");
                 ImGui::EndTabItem();
             }
             
             // === MAP ===
             if (ImGui::BeginTabItem("Map")) {
+                static bool wasMap = false;
                 ImGui::Checkbox("🗺️ Hack Map", &Map);
+                if (Map != wasMap) {
+                    uint32_t pOn  = 0xD2800036; // mov w22, #0
+                    uint32_t pOff = 0xD50320C0;
+                    PatchMemory((void*)UF(0x4826BB8), Map ? &pOn : &pOff, 4);
+                    wasMap = Map;
+                }
                 ImGui::TextDisabled("RVA: 0x4826BB8");
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
         }
         ImGui::End();
-    }
-
-    // ========== PATCH CODE — ĐỊNH NGHĨA 1 LẦN ==========
-    static char fw[] = "Frameworks/UnityFramework.framework/UnityFramework";
-    const char *ret = "C0035FD61F2003D51F2003D5"; // ret = ret; ret = ret;
-    const char *nop8 = "000080D2C0035FD6";          // nop + ret
-    const char *pUlt = "20008052C0035FD6";           // mov w0, #0x20; ret
-    const char *pMap = "360080D2";                   // mov w22, #0
-
-    // Antiban — luôn bật
-    { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x5F88E3C, p); }
-    { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x4C3E394, p); }
-    { char p[] = "000080D2C0035FD6";        ActiveCodePatch(fw, 0x6C46CFC, p); }
-    { char p[] = "C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x6C46220, p); }
-    { char p[] = "000080D2C0035FD61F2003D51F2003D5"; ActiveCodePatch(fw, 0x6C45E70, p); }
-    { char p[] = "000080D2C0035FD6";        ActiveCodePatch(fw, 0x6C462B8, p); }
-
-    // ========== CAMERA PATCH ==========
-    static bool camPatched = false;
-    if (lockcam && !camPatched) {
-        char p[] = "20008052C0035FD6";
-        ActiveCodePatch(fw, 0x525BE48, p);
-        camPatched = true;
-    } else if (!lockcam && camPatched) {
-        DeactiveCodePatch(fw, 0x525BE48, (char*)pUlt);
-        camPatched = false;
-    }
-
-    // ========== SHOW ULTR ĐỊCH — 3 ĐỊA CHỈ ==========
-    static bool ultPatched = false;
-    if (ShowUlt && !ultPatched) {
-        char p[] = "20008052C0035FD6";
-        ActiveCodePatch(fw, 0x5BA7218, p);
-        ActiveCodePatch(fw, 0x6660B80, p);
-        ActiveCodePatch(fw, 0x6660A1C, p);
-        ultPatched = true;
-    } else if (!ShowUlt && ultPatched) {
-        char p[] = "20008052C0035FD6";
-        DeactiveCodePatch(fw, 0x5BA7218, p);
-        DeactiveCodePatch(fw, 0x6660B80, p);
-        DeactiveCodePatch(fw, 0x6660A1C, p);
-        ultPatched = false;
-    }
-
-    // ========== HACK MAP ==========
-    static bool mapPatched = false;
-    if (Map && !mapPatched) {
-        char p[] = "360080D2";
-        ActiveCodePatch(fw, 0x4826BB8, p);
-        mapPatched = true;
-    } else if (!Map && mapPatched) {
-        char p[] = "360080D2";
-        DeactiveCodePatch(fw, 0x4826BB8, p);
-        mapPatched = false;
     }
 
     ImGui::Render();
