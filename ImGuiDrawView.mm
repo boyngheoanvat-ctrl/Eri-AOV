@@ -12,7 +12,7 @@
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
 
-// ===== KHAI BÁO HÀM & MACRO =====
+// ===== KHAI BÁO HÀM =====
 extern void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex);
 extern void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex);
 
@@ -22,12 +22,6 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 #ifndef ENCRYPTOFFSET
 #define ENCRYPTOFFSET(hexStr) ((uintptr_t)strtoull((hexStr) + 2, NULL, 16))
-#endif
-
-// ✅ SỬA: Định nghĩa macro HOOK — dùng DobbyHook trực tiếp
-#ifndef HOOK
-#define HOOK(addrVar, origFuncPtr, newFunc) \
-    DobbyHook((void*)UF(addrVar), (void*)newFunc, (void**)&origFuncPtr)
 #endif
 
 #define OBFUSCATE(s) (s)
@@ -58,7 +52,7 @@ static bool s_mapApplied = false;
 bool camXaActive = false;
 static bool s_camXaApplied = false;
 
-// Cam Kéo — dùng HOOK
+// Cam Kéo — HOOK
 typedef float (*fn_cam)(void* _this, int type);
 static fn_cam _cam = nullptr;
 typedef void (*fn_Update)(void* _this);
@@ -105,7 +99,7 @@ float cam(void* _this, int type) {
 void Update(void* _this) { if (_Update) _Update(_this); }
 void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
-// ========== ÁP DỤNG ANTIBAN TỰ ĐỘNG ==========
+// ========== ANTIBAN TỰ ĐỘNG ==========
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
@@ -126,7 +120,6 @@ static void* hack_thread(void*) {
     
     sleep(2);
     dispatch_async(dispatch_get_main_queue(), ^{
-        // ✅ SỬA: Dùng số trực tiếp thay vì ENCRYPTOFFSET trong macro
         DobbyHook((void*)UF(0x51C4048), (void*)cam, (void**)&_cam);
         DobbyHook((void*)UF(0x51C2C04), (void*)Update, (void**)&_Update);
         DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
@@ -135,10 +128,16 @@ static void* hack_thread(void*) {
     return nullptr;
 }
 
-// ========== IMPLEMENTATION ==========
+// ✅ SỬA: Thêm @interface mở rộng khai báo property
+@interface ImGuiDrawView () <MTKViewDelegate>
+@property (nonatomic, strong) MTKView *mtkView;
+@property (nonatomic, assign) BOOL touchDown;
+@property (nonatomic, strong) id<MTLDevice> device;
+@property (nonatomic, strong) id<MTLCommandQueue> cmdQueue;
+@end
+
 @implementation ImGuiDrawView
 
-// ✅ SỬA: Thêm hàm showChange bị thiếu trong .h
 + (void)showMenu:(BOOL)open { MenDeal = open; }
 + (void)showChange:(BOOL)open { MenDeal = open; }
 
@@ -157,6 +156,10 @@ static void* hack_thread(void*) {
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
     ImGui_ImplMetal_Init(_device);
     pthread_t th; pthread_create(&th, nullptr, hack_thread, nullptr); pthread_detach(th);
+}
+
+- (void)loadView {
+    self.view = [[UIView alloc] initWithFrame:[UIScreen mainScreen].bounds];
 }
 
 - (void)viewDidLoad {
@@ -179,19 +182,30 @@ static void* hack_thread(void*) {
         ImGuiIO& io = ImGui::GetIO();
         io.MousePos = ImVec2(p.x, p.y);
         io.MouseDown[0] = YES;
+        _touchDown = YES;
         return;
     }
     [super touchesBegan:touches withEvent:event];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (!MenDeal) { [super touchesMoved:touches withEvent:event]; return; }
-    ImGui::GetIO().MousePos = ImVec2([[touches anyObject] locationInView:self.view].x, [[touches anyObject] locationInView:self.view].y);
+    CGPoint p = [[touches anyObject] locationInView:self.view];
+    if (MenDeal && _touchDown) {
+        ImGui::GetIO().MousePos = ImVec2(p.x, p.y);
+        return;
+    }
+    [super touchesMoved:touches withEvent:event];
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (MenDeal) { ImGui::GetIO().MouseDown[0] = NO; return; }
+    if (MenDeal) {
+        ImGui::GetIO().MouseDown[0] = NO;
+        _touchDown = NO;
+        return;
+    }
     [super touchesEnded:touches withEvent:event];
 }
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event { [self touchesEnded:touches withEvent:event]; }
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [self touchesEnded:touches withEvent:event];
+}
 
 #pragma mark - RENDER
 - (void)drawInMTKView:(MTKView *)view {
