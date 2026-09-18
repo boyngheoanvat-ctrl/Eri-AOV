@@ -30,11 +30,13 @@ extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
+// ✅ SỬA: OBFUSCATE trả về chuỗi C const char*
 #ifndef OBFUSCATE
 #define OBFUSCATE(s) (s)
 #endif
 
-#define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
+// ✅ SỬA: LOGI dùng trực tiếp chuỗi C, không thêm @ tự động
+#define LOGI(fmt, ...) NSLog(@"%s" fmt, "[MOD] ", ##__VA_ARGS__)
 
 #define kWidth  [UIScreen mainScreen].bounds.size.width
 #define kHeight [UIScreen mainScreen].bounds.size.height
@@ -43,18 +45,17 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 using namespace IL2CPP;
 
 // ===== BIẾN BẠN YÊU CẦU =====
-bool featureHookToggle = false;   // ✅ Đã thêm
-void *instanceBtn = nullptr;      // ✅ Đã thêm
-uintptr_t il2cppBase = 0;         // ✅ Đã thêm — toàn cục như cũ
+bool featureHookToggle = false;
+void *instanceBtn = nullptr;
+uintptr_t il2cppBase = 0;
 
-// ===== HÀM TÌM BASE — FIX ẨN LIB (phiên bản iOS) =====
+// ===== HÀM TÌM BASE =====
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
     uint32_t cnt = _dyld_image_count();
     for (uint32_t i = 0; i < cnt; i++) {
         const char* name = _dyld_get_image_name(i);
         if (!name) continue;
-        // Tìm chính xác hoặc tên rút gọn
         if (strstr(name, libName)) {
             base = (uintptr_t)_dyld_get_image_header(i);
             break;
@@ -109,7 +110,6 @@ void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* ori
     if (len > 0) PatchMemoryEx((void*)(base + rva), bytes, len);
 }
 
-// ===== TRỞ ĐỊA CHỈ + RVA =====
 static uintptr_t UF(uintptr_t rva) {
     return il2cppBase ? il2cppBase + rva : 0;
 }
@@ -149,31 +149,31 @@ void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
 // ========== ANTIBAN ==========
 static void ApplyAntiBanPatches() {
-    LOGI(@"=== ÁP DỤNG ANTIBAN ===");
+    LOGI("=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x4C3E394, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x6C46CFC, "0x000080D2C0035FD6");
     DeactiveCodePatch(kFW, 0x6C46220, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x6C45E70, "0x000080D2C0035FD6");
     DeactiveCodePatch(kFW, 0x6C462B8, "0x000080D2C0035FD6");
-    LOGI(@"✅ AntiBan đã áp dụng tự động");
+    LOGI("✅ AntiBan đã áp dụng tự động");
 }
 
-// ========== HACK THREAD — GIỮ LOGIC CỦA BẠN ==========
+// ========== HACK THREAD ==========
 void *hack_thread(void *) {
-    LOGI(OBFUSCATE("Hack thread started. Searching for lib..."));
+    LOGI("Hack thread started. Searching for lib...");
 
-    // Vòng lặp quét lib cho đến khi tìm thấy — Fix ẩn/nạp muộn
     do {
         il2cppBase = get_lib_base(targetLibName);
         if (il2cppBase == 0) {
-            // Thử tên rút gọn nếu game đổi tên
             il2cppBase = get_lib_base("UnityFramework");
         }
         usleep(500000);
     } while (il2cppBase == 0);
 
-    LOGI(OBFUSCATE("Lib found at: %p"), (void*)il2cppBase);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Lib found at: %p", (void*)il2cppBase);
+    LOGI(buf);
 
     ApplyAntiBanPatches();
     
@@ -182,7 +182,7 @@ void *hack_thread(void *) {
         DobbyHook((void*)UF(0x51C4048), (void*)cam, (void**)&_cam);
         DobbyHook((void*)UF(0x51C2C04), (void*)Update, (void**)&_Update);
         DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
-        LOGI(@"✅ Camera hooks đã sẵn sàng");
+        LOGI("✅ Camera hooks đã sẵn sàng");
     });
     return nullptr;
 }
@@ -288,15 +288,13 @@ void *hack_thread(void *) {
         if (ImGui::Begin("Menu AOV", &MenDeal)) {
             if (ImGui::BeginTabBar("TabBar")) {
                 
-                // === CAM KÉO + featureHookToggle ===
                 if (ImGui::BeginTabItem("Cam Kéo")) {
                     ImGui::Checkbox("Kéo Camera", &camHookActive);
-                    ImGui::Checkbox("Feature Toggle", &featureHookToggle); // ✅ Đã thêm
+                    ImGui::Checkbox("Feature Toggle", &featureHookToggle);
                     ImGui::SliderFloat("FOV", &SetFieldOfView, 0.1f, 15.0f);
                     ImGui::EndTabItem();
                 }
                 
-                // === CAM XA ===
                 if (ImGui::BeginTabItem("Cam Xa")) {
                     bool newCamXa = camXaActive;
                     if (ImGui::Checkbox("Cam Xa 3 Nấc", &newCamXa)) {
@@ -314,7 +312,6 @@ void *hack_thread(void *) {
                     ImGui::EndTabItem();
                 }
                 
-                // === SHOW ULT ===
                 if (ImGui::BeginTabItem("Show Ult")) {
                     bool newUlt = showUltActive;
                     if (ImGui::Checkbox("Hiện Kỹ Năng", &newUlt)) {
@@ -336,7 +333,6 @@ void *hack_thread(void *) {
                     ImGui::EndTabItem();
                 }
                 
-                // === MAP ===
                 if (ImGui::BeginTabItem("Map")) {
                     bool newMap = mapActive;
                     if (ImGui::Checkbox("Map Toàn Cục", &newMap)) {
