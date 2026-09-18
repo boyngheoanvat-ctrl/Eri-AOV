@@ -2,6 +2,7 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <mach/mach.h>
 #import <mach/vm_map.h>
 #include <mach-o/loader.h>
@@ -11,11 +12,12 @@
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
 
-// ===== KHAI BÁO =====
+// ===== KHAI BÁO HÀM DYLD =====
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
+// ===== MACRO =====
 #define OBFUSCATE(s) (s)
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
 
@@ -25,27 +27,33 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 using namespace IL2CPP;
 
-// ========== BIẾN ==========
+// ========== BIẾN TOÀN CỤC ==========
 bool featureHookToggle = false;
 uintptr_t il2cppBase = 0;
-bool MenDeal = false;  // ⚠️ Mặc định ẨN MENU TRƯỚC — không ảnh hưởng game
+bool MenDeal = false;  // Mặc định ẩn menu
 float SetFieldOfView = 6.0f;
 
-// ========== LẤY BASE ==========
+// ========== LẤY ĐỊA CHỈ BASE ==========
 static const char* kTargetLibName = OBFUSCATE("UnityFramework");
+
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
     uint32_t imageCount = _dyld_image_count();
     for (uint32_t i = 0; i < imageCount; i++) {
         const char* name = _dyld_get_image_name(i);
         if (!name) continue;
-        if (strstr(name, libName)) { base = (uintptr_t)_dyld_get_image_header(i); break; }
-        if (strstr(name, "UnityFramework") && !base) { base = (uintptr_t)_dyld_get_image_header(i); }
+        if (strstr(name, libName)) {
+            base = (uintptr_t)_dyld_get_image_header(i);
+            break;
+        }
+        if (strstr(name, "UnityFramework") && !base) {
+            base = (uintptr_t)_dyld_get_image_header(i);
+        }
     }
     return base;
 }
 
-// ========== PATCH MEM ==========
+// ========== GHI BỘ NHỚ ==========
 static bool PatchMemory(void* addr, const void* data, size_t len) {
     vm_prot_t old;
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
@@ -54,14 +62,16 @@ static bool PatchMemory(void* addr, const void* data, size_t len) {
     return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
 }
 
+// ========== RVA -> ĐỊA CHỈ ==========
 static uintptr_t UF(uintptr_t rva) {
     if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
     return il2cppBase ? il2cppBase + rva : 0;
 }
 
 // ==================================================
-// ========== CAMERA HOOK — AN TOÀN ============
+// ========== 3 HOOK CAMERA — AN TOÀN ============
 // ==================================================
+
 typedef float (*fn_GetCameraHeightRateValue)(void* _this, int type);
 fn_GetCameraHeightRateValue orig_GetCameraHeightRateValue = nullptr;
 
@@ -74,15 +84,23 @@ float hook_GetCameraHeightRateValue(void* _this, int type) {
 
 typedef void (*fn_Update)(void* _this);
 fn_Update orig_Update = nullptr;
-void hook_Update(void* _this) { if (orig_Update) orig_Update(_this); }
+void hook_Update(void* _this) {
+    if (orig_Update) orig_Update(_this);
+}
 
 typedef void (*fn_OnCameraHeightChanged)(void* _this);
 fn_OnCameraHeightChanged orig_OnCameraHeightChanged = nullptr;
-void hook_OnCameraHeightChanged(void* _this) { if (orig_OnCameraHeightChanged) orig_OnCameraHeightChanged(_this); }
+void hook_OnCameraHeightChanged(void* _this) {
+    if (orig_OnCameraHeightChanged) orig_OnCameraHeightChanged(_this);
+}
 
 // ========== HOOK THREAD ==========
 static void* hack_thread(void*) {
-    do { il2cppBase = get_lib_base(kTargetLibName); usleep(500000); } while (il2cppBase == 0);
+    do {
+        il2cppBase = get_lib_base(kTargetLibName);
+        usleep(500000);
+    } while (il2cppBase == 0);
+
     LOGI(@"UnityFramework OK");
     sleep(3); // Đợi vào game
 
@@ -95,21 +113,44 @@ static void* hack_thread(void*) {
         void* pUpdate = (void*)UF(rva_Update);
         void* pOnCam  = (void*)UF(rva_OnCam);
 
-        if (pGetCam && !orig_GetCameraHeightRateValue)
+        if (pGetCam && !orig_GetCameraHeightRateValue) {
             DobbyHook(pGetCam, (void*)hook_GetCameraHeightRateValue, (void**)&orig_GetCameraHeightRateValue);
-        if (pUpdate && !orig_Update)
+        }
+        if (pUpdate && !orig_Update) {
             DobbyHook(pUpdate, (void*)hook_Update, (void**)&orig_Update);
-        if (pOnCam && !orig_OnCameraHeightChanged)
+        }
+        if (pOnCam && !orig_OnCameraHeightChanged) {
             DobbyHook(pOnCam, (void*)hook_OnCameraHeightChanged, (void**)&orig_OnCameraHeightChanged);
+        }
     });
     return nullptr;
 }
 
 // ========== IMPLEMENTATION ==========
+@interface ImGuiDrawView () <MTKViewDelegate>
+@property (nonatomic, strong) id<MTLDevice> device;
+@property (nonatomic, strong) id<MTLCommandQueue> cmdQueue;
+@property (nonatomic, strong) MTKView *mtkView;
+@end
+
 @implementation ImGuiDrawView
+
++ (void)showMenu:(BOOL)open { MenDeal = open; }
++ (void)showChange:(BOOL)open { MenDeal = open; }
+
+- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
+    if (!(self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil])) return nil;
+    [self commonInit];
+    return self;
+}
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
+    [self commonInit];
+    return self;
+}
+
+- (void)commonInit {
     _device = MTLCreateSystemDefaultDevice();
     _cmdQueue = [_device newCommandQueue];
     
@@ -122,21 +163,22 @@ static void* hack_thread(void*) {
     pthread_t th;
     pthread_create(&th, nullptr, hack_thread, nullptr);
     pthread_detach(th);
-
-    return self;
 }
 
-- (void)didMoveToView:(UIView *)view {
-    if (!self.mtkView) {
-        MTKView *mtk = [[MTKView alloc] initWithFrame:view.bounds];
-        mtk.device = _device;
-        mtk.delegate = self;
-        mtk.clearColor = MTLClearColorMake(0,0,0,0); // ✅ TRONG SUỐT HOÀN TOÀN
-        mtk.opaque = NO; // ✅ Quan trọng — không che nền game
-        mtk.paused = NO;
-        [self addSubview:mtk];
-        self.mtkView = mtk;
-    }
+- (void)loadView {
+    self.view = [[UIView alloc] initWithFrame:[UIScreen mainScreen].bounds];
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds];
+    self.mtkView.device = self.device;
+    self.mtkView.delegate = self;
+    self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0); // Trong suốt
+    self.mtkView.opaque = NO;
+    self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:self.mtkView];
 }
 
 #pragma mark - CHẠM 3 NGÓN → BẬT/TẮT MENU
@@ -145,38 +187,37 @@ static void* hack_thread(void*) {
         MenDeal = !MenDeal;
         LOGI(@"Menu: %@", MenDeal ? @"HIỆN" : @"ẨN");
     }
-    // Chuyển sự kiện chạm cho game
     [super touchesBegan:touches withEvent:event];
 }
 
 - (void)touchesMoved:(NSSet<UITouch*> *)touches withEvent:(UIEvent *)event {
     [super touchesMoved:touches withEvent:event];
 }
+
 - (void)touchesEnded:(NSSet<UITouch*> *)touches withEvent:(UIEvent *)event {
     [super touchesEnded:touches withEvent:event];
 }
+
 - (void)touchesCancelled:(NSSet<UITouch*> *)touches withEvent:(UIEvent *)event {
     [super touchesCancelled:touches withEvent:event];
 }
 
-#pragma mark - RENDER — KHÔNG CHE GAME
+#pragma mark - RENDER
 - (void)drawInMTKView:(MTKView*)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
-    io.DeltaTime = 1.0f/60.0f;
+    io.DeltaTime = 1.0f / 60.0f;
 
-    // ✅ Chỉ nhận chạm khi MENU ĐANG HIỆN → game vẫn nhận chạm bình thường
-    self.userInteractionEnabled = MenDeal;
+    // Chỉ nhận chạm khi menu hiện
+    self.mtkView.userInteractionEnabled = MenDeal;
 
-    id<MTLCommandBuffer> cmd = [_cmdQueue commandBuffer];
+    id<MTLCommandBuffer> cmd = [self.cmdQueue commandBuffer];
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (!pass) return;
 
-    // ✅ KHÔNG XÓA NỀN → giữ nguyên hình game
-    for (int i = 0; i < pass.colorAttachments.count; i++) {
-        pass.colorAttachments[i].loadAction = MTLLoadActionLoad;
-    }
+    // ✅ Giữ nguyên khung hình game — không xóa nền
+    pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
 
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
 
@@ -186,7 +227,7 @@ static void* hack_thread(void*) {
     // === NÚT DỰ PHÒNG ===
     if (!MenDeal) {
         ImGui::SetNextWindowPos(ImVec2(20, 20));
-        if (ImGui::Begin("≡", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground)) {
+        if (ImGui::Begin("≡", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration)) {
             if (ImGui::Button("Hiện Menu")) {
                 MenDeal = true;
             }
@@ -197,33 +238,39 @@ static void* hack_thread(void*) {
     // === MENU CHÍNH ===
     if (MenDeal && ImGui::Begin("Menu AOV", &MenDeal)) {
         if (ImGui::BeginTabBar("TabBar")) {
+            
             if (ImGui::BeginTabItem("Camera")) {
                 ImGui::Checkbox("Enable Hook", &featureHookToggle);
                 ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f);
                 ImGui::EndTabItem();
             }
+            
             if (ImGui::BeginTabItem("Show Ult")) {
                 static bool ShowUlt = false, wasUlt = false;
                 ImGui::Checkbox("Show Enemy Skill", &ShowUlt);
                 if (ShowUlt != wasUlt && il2cppBase) {
-                    uint32_t pOn=0x52800020, pOff=0xD50320C0;
-                    PatchMemory((void*)UF(0x5BA7218), ShowUlt?&pOn:&pOff,4);
-                    PatchMemory((void*)UF(0x6660B80), ShowUlt?&pOn:&pOff,4);
-                    PatchMemory((void*)UF(0x6660A1C), ShowUlt?&pOn:&pOff,4);
+                    uint32_t pOn  = 0x52800020;
+                    uint32_t pOff = 0xD50320C0;
+                    PatchMemory((void*)UF(0x5BA7218), ShowUlt ? &pOn : &pOff, 4);
+                    PatchMemory((void*)UF(0x6660B80), ShowUlt ? &pOn : &pOff, 4);
+                    PatchMemory((void*)UF(0x6660A1C), ShowUlt ? &pOn : &pOff, 4);
                     wasUlt = ShowUlt;
                 }
                 ImGui::EndTabItem();
             }
+            
             if (ImGui::BeginTabItem("Map")) {
                 static bool Map = false, wasMap = false;
                 ImGui::Checkbox("Enable Map", &Map);
                 if (Map != wasMap && il2cppBase) {
-                    uint32_t pOn=0xD2800036, pOff=0xD50320C0;
-                    PatchMemory((void*)UF(0x4826BB8), Map?&pOn:&pOff,4);
+                    uint32_t pOn  = 0xD2800036;
+                    uint32_t pOff = 0xD50320C0;
+                    PatchMemory((void*)UF(0x4826BB8), Map ? &pOn : &pOff, 4);
                     wasMap = Map;
                 }
                 ImGui::EndTabItem();
             }
+            
             ImGui::EndTabBar();
         }
         ImGui::End();
