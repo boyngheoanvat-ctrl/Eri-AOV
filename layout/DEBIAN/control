@@ -1,7 +1,7 @@
 Package: com.boyngheoanvat.34306jit
 Name: 34306jit
 Depends: mobilesubstrate
-Version: 2.2
+Version: 2.3
 Architecture: arm64
 Description: Hỗ trợ tất cả iPhone 64-bit
 Maintainer: boyngheoanvat
