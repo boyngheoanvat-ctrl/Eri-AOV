@@ -17,29 +17,36 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y \
-            build-essential git perl libssl-dev curl wget zip unzip xz-utils
+            build-essential git perl libssl-dev curl wget zip unzip xz-utils \
+            libtinfo6
 
       - name: Setup Theos
         run: |
           git clone --depth=1 --recursive https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+
+      - name: Install Linux Toolchain (clang)
+        run: |
+          cd $THEOS
+          curl -sL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz | tar -xJvf - -C $THEOS/toolchain/
+          ls -la $THEOS/toolchain/linux/iphone/bin/
 
       - name: Download SDK
         run: |
-          mkdir -p $GITHUB_WORKSPACE/theos/sdks
-          cd $GITHUB_WORKSPACE/theos/sdks
+          mkdir -p $THEOS/sdks
+          cd $THEOS/sdks
           curl -L https://github.com/theos/sdks/archive/refs/heads/master.zip -o sdks.zip
           unzip -q sdks.zip
           mv sdks-master/*.sdk ./
           rm -rf sdks-master sdks.zip
+          echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: Build — Export đủ biến
+      - name: Build
         env:
           THEOS: ${{ github.workspace }}/theos
-          THEOS_MAKE_PATH: ${{ github.workspace }}/theos/makefiles
           THEOS_SDK: iPhoneOS15.6.sdk
-          SDKVERSION: 15.6
         run: |
-          make package THEOS=$THEOS THEOS_MAKE_PATH=$THEOS_MAKE_PATH SDKVERSION=$SDKVERSION
+          make package
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
