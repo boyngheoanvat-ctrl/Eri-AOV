@@ -29,7 +29,7 @@ jobs:
           cd "$GITHUB_WORKSPACE/theos"
           curl -sL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz | tar -xJvf - -C toolchain/
 
-      - name: Download & Install SDK — Đúng chuẩn
+      - name: Download SDK
         run: |
           mkdir -p "$THEOS/sdks"
           cd "$THEOS/sdks"
@@ -38,19 +38,25 @@ jobs:
           unzip -q master.zip -d "$TMP"
           mv "$TMP"/sdks-master/*.sdk ./
           rm -rf "$TMP" master.zip
-          ls -la
           echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: Build — arm64 only
+      - name: Download libdobby.a (arm64)
+        run: |
+          mkdir -p lib
+          cd lib
+          # Tải Dobby đã biên dịch sẵn cho iOS-arm64 từ repo chính thức
+          curl -L -o libdobby.a "https://github.com/jmpews/Dobby/releases/download/latest/libdobby-ios-arm64.a"
+          ls -la libdobby.a
+
+      - name: Build
         run: |
           export THEOS="$GITHUB_WORKSPACE/theos"
-          export THEOS_SDK="iPhoneOS15.6.sdk"
           make package
 
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
-          name: 34306jit-deb
+          name: 34306jit-DEB
           path: packages/*.deb
           retention-days: 7
 
@@ -58,6 +64,6 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: 34306jit-dylib
+          name: 34306jit-DYLIB
           path: .theos/obj/arm64/*.dylib
           retention-days: 7
