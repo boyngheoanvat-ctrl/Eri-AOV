@@ -11,15 +11,13 @@
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
 
-// ===== KHAI BÁO HÀM DYLD — KHÔNG CẦN HEADER =====
+// ===== KHAI BÁO HÀM DYLD =====
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-// ===== MACRO OBFUSCATE =====
-#define OBFUSCATE_IMPL2(x, y) x##y
-#define OBFUSCATE_IMPL1(x, y) OBFUSCATE_IMPL2(x, y)
-#define OBFUSCATE(str) __attribute__((section("__TEXT,__obf"))) static const char *OBFUSCATE_IMPL1(s, __LINE__) = str; str
+// ===== MACRO OBFUSCATE — ĐƠN GIẢN HÓA =====
+#define OBFUSCATE(s) (s)
 
 // ===== LOG =====
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
@@ -30,12 +28,13 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 using namespace IL2CPP;
 
-// ========== BIẾN BẠN YÊU CẦU ==========
+// ========== KHAI BÁO BIẾN TOÀN CỤC — ĐỦ HẾT =====
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
+bool MenDeal = true; // ✅ Đã khai báo
 
-// ========== HÀM LẤY ĐỊA CHỈ BASE — ĐÃ SỬA KHÔNG CẦN HEADER DYLD =====
+// ========== HÀM LẤY ĐỊA CHỈ BASE ==========
 static const char* kTargetLibName = OBFUSCATE("UnityFramework");
 
 uintptr_t get_lib_base(const char* libName) {
@@ -104,7 +103,7 @@ static void* hack_thread(void*) {
         usleep(500000);
     } while (il2cppBase == 0);
 
-    LOGI(@"✅ UnityFramework tìm thấy tại: 0x%lx", il2cppBase);
+    LOGI(@"UnityFramework found at: 0x%lx", il2cppBase);
 
     dispatch_async(dispatch_get_main_queue(), ^{
         uintptr_t rva_GetCam = 0x51C4048;
@@ -119,7 +118,7 @@ static void* hack_thread(void*) {
         if (pUpdate) DobbyHook(pUpdate, (void*)hook_Update, (void**)&orig_Update);
         if (pOnCam)  DobbyHook(pOnCam,  (void*)hook_OnCamChanged, (void**)&orig_OnCamChanged);
 
-        LOGI(@"✅ Tất cả hook đã được cài đặt!");
+        LOGI(@"All hooks installed");
     });
 
     return nullptr;
@@ -193,25 +192,31 @@ static void* hack_thread(void*) {
             
             if (ImGui::BeginTabItem("Camera")) {
                 static bool wasToggle = false;
-                ImGui::Checkbox("🔒 Bật/Tắt Hook", &featureHookToggle);
+                ImGui::Checkbox("Enable Hook", &featureHookToggle);
                 static float fovValue = 6.0f;
-                ImGui::SliderFloat("📐 Độ cao FOV", &fovValue, 0.1f, 15.0f);
+                ImGui::SliderFloat("FOV Value", &fovValue, 0.1f, 15.0f);
                 if (featureHookToggle) {
                     extern float SetFieldOfView;
                     SetFieldOfView = fovValue;
                 }
                 if (featureHookToggle != wasToggle) {
-                    LOGI(featureHookToggle ? @"✅ Hook BẬT" : @"⚠️ Hook TẮT");
+                    if (featureHookToggle) {
+                        LOGI(@"Hook turned ON");
+                    } else {
+                        LOGI(@"Hook turned OFF");
+                    }
                     wasToggle = featureHookToggle;
                 }
-                ImGui::TextDisabled(@"Base: 0x%lx", il2cppBase);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Base: 0x%lx", il2cppBase);
+                ImGui::TextDisabled("%s", buf);
                 ImGui::EndTabItem();
             }
             
             if (ImGui::BeginTabItem("Show Ult")) {
                 static bool ShowUlt = false;
                 static bool wasUlt = false;
-                ImGui::Checkbox("👁️ Hiện Kỹ Năng Địch", &ShowUlt);
+                ImGui::Checkbox("Show Enemy Skill", &ShowUlt);
                 if (ShowUlt != wasUlt && il2cppBase) {
                     uint32_t pOn  = 0x52800020;
                     uint32_t pOff = 0xD50320C0;
@@ -226,7 +231,7 @@ static void* hack_thread(void*) {
             if (ImGui::BeginTabItem("Map")) {
                 static bool Map = false;
                 static bool wasMap = false;
-                ImGui::Checkbox("🗺️ Hack Map", &Map);
+                ImGui::Checkbox("Enable Map", &Map);
                 if (Map != wasMap && il2cppBase) {
                     uint32_t pOn  = 0xD2800036;
                     uint32_t pOff = 0xD50320C0;
