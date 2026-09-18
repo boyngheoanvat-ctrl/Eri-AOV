@@ -32,7 +32,6 @@ extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-// Macro LOGI đơn giản, không lỗi
 #define LOGI(fmt, ...) NSLog(@"[MOD] " fmt, ##__VA_ARGS__)
 
 #define kWidth   [UIScreen mainScreen].bounds.size.width
@@ -68,7 +67,7 @@ static const char* const targetLibName = "UnityFramework";
 static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
 
 // ==============================================
-// HÀM TÌM BASE ADDRESS
+// TÌM BASE ADDRESS
 // ==============================================
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
@@ -85,10 +84,9 @@ uintptr_t get_lib_base(const char* libName) {
 }
 
 // ==============================================
-// HÀM HỖ TRỢ PATCH BỘ NHỚ
+// PATCH BỘ NHỚ — ĐÃ SỬA LỖI BIẾN KHÔNG DÙNG
 // ==============================================
 static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
-    vm_prot_t oldProt;
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
         return false;
@@ -153,7 +151,7 @@ void Update(void* _this) { if (_Update) _Update(_this); }
 void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
 // ==============================================
-// ANTI-BAN TỰ ĐỘNG
+// ANTI-BAN
 // ==============================================
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
@@ -167,10 +165,10 @@ static void ApplyAntiBanPatches() {
 }
 
 // ==============================================
-// HACK THREAD — CHỜ NẠP LIB
+// CHỜ NẠP UNITYFRAMEWORK
 // ==============================================
 void *hack_thread(void *) {
-    LOGI(@"Thread khởi động, đang tìm lib...");
+    LOGI(@"Thread khởi động, đang tìm UnityFramework...");
 
     do {
         il2cppBase = get_lib_base(targetLibName);
@@ -179,7 +177,7 @@ void *hack_thread(void *) {
         usleep(500000);
     } while (il2cppBase == 0);
 
-    LOGI(@"✅ Lib tìm thấy tại: %p", (void*)il2cppBase);
+    LOGI(@"✅ UnityFramework tìm thấy tại: %p", (void*)il2cppBase);
 
     ApplyAntiBanPatches();
     
