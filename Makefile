@@ -1,4 +1,7 @@
-ARCHS = arm64
+# Kiến trúc hỗ trợ TOÀN BỘ máy 64-bit
+ARCHS = arm64 arm64e
+TARGET = iphone:clang:15.6:14.0
+
 FINALPACKAGE = 1
 FOR_RELEASE = 1
 WARNINGS = 1
