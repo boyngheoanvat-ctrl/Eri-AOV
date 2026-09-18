@@ -20,6 +20,12 @@ jobs:
         export THEOS="$GITHUB_WORKSPACE/theos"
         echo "THEOS=$THEOS" >> $GITHUB_ENV
 
+    - name: Download iPhone SDKs
+      run: |
+        export THEOS="$GITHUB_WORKSPACE/theos"
+        git clone --depth=1 https://github.com/theos/sdks.git "$THEOS/sdks"
+        ls -la "$THEOS/sdks/"
+
     - name: Install dependencies
       run: |
         sudo apt-get update && sudo apt-get install -y build-essential git libplist-dev libcurl4-openssl-dev
