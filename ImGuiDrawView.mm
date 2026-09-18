@@ -16,10 +16,8 @@ extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-// ===== MACRO OBFUSCATE — ĐƠN GIẢN HÓA =====
+// ===== MACRO =====
 #define OBFUSCATE(s) (s)
-
-// ===== LOG =====
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
 
 #define kWidth  [UIScreen mainScreen].bounds.size.width
@@ -28,13 +26,14 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 using namespace IL2CPP;
 
-// ========== KHAI BÁO BIẾN TOÀN CỤC — ĐỦ HẾT =====
+// ========== BIẾN TOÀN CỤC — ĐỦ HẾT & ĐỊNH NGHĨA THỰC ==========
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
-bool MenDeal = true; // ✅ Đã khai báo
+bool MenDeal = true;
+float SetFieldOfView = 6.0f;  // ✅ Định nghĩa thực — không còn lỗi linker
 
-// ========== HÀM LẤY ĐỊA CHỈ BASE ==========
+// ========== LẤY ĐỊA CHỈ BASE ==========
 static const char* kTargetLibName = OBFUSCATE("UnityFramework");
 
 uintptr_t get_lib_base(const char* libName) {
@@ -54,7 +53,7 @@ uintptr_t get_lib_base(const char* libName) {
     return base;
 }
 
-// ========== HÀM GHI BỘ NHỚ ==========
+// ========== GHI BỘ NHỚ ==========
 static bool PatchMemory(void* addr, const void* data, size_t len) {
     vm_prot_t old;
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
@@ -63,7 +62,7 @@ static bool PatchMemory(void* addr, const void* data, size_t len) {
     return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
 }
 
-// ========== HÀM TRỢ GIÚP — RVA -> ĐỊA CHỈ ==========
+// ========== RVA -> ĐỊA CHỈ ==========
 static uintptr_t UF(uintptr_t rva) {
     if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
     return il2cppBase ? il2cppBase + rva : 0;
@@ -74,7 +73,7 @@ typedef float (*fn_GetCamHeight)(void*);
 fn_GetCamHeight orig_GetCamHeight = nullptr;
 float hook_GetCamHeight(void* _this) {
     if (featureHookToggle) {
-        return 6.0f;
+        return SetFieldOfView; // ✅ Dùng trực tiếp biến toàn cục
     }
     return orig_GetCamHeight ? orig_GetCamHeight(_this) : 2.0f;
 }
@@ -193,18 +192,9 @@ static void* hack_thread(void*) {
             if (ImGui::BeginTabItem("Camera")) {
                 static bool wasToggle = false;
                 ImGui::Checkbox("Enable Hook", &featureHookToggle);
-                static float fovValue = 6.0f;
-                ImGui::SliderFloat("FOV Value", &fovValue, 0.1f, 15.0f);
-                if (featureHookToggle) {
-                    extern float SetFieldOfView;
-                    SetFieldOfView = fovValue;
-                }
+                ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f); // ✅ Dùng trực tiếp
                 if (featureHookToggle != wasToggle) {
-                    if (featureHookToggle) {
-                        LOGI(@"Hook turned ON");
-                    } else {
-                        LOGI(@"Hook turned OFF");
-                    }
+                    LOGI(featureHookToggle ? @"Hook ON" : @"Hook OFF");
                     wasToggle = featureHookToggle;
                 }
                 char buf[64];
