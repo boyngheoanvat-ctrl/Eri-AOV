@@ -37,7 +37,7 @@ jobs:
           mv sdks-master/*.sdk ./
           rm -rf sdks-master sdks.zip
 
-      - name: Build — TRUYỀN BIẾN TRỰC TIẾP
+      - name: Build
         run: |
           export THEOS="$GITHUB_WORKSPACE/theos"
           export THEOS_MAKE_PATH="$THEOS/makefiles"
