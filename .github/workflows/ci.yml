@@ -34,10 +34,9 @@ jobs:
           mkdir -p "$THEOS/sdks"
           cd "$THEOS/sdks"
           curl -LO https://github.com/theos/sdks/archive/refs/heads/master.zip
-          TMP=$(mktemp -d)
-          unzip -q master.zip -d "$TMP"
-          mv "$TMP"/sdks-master/*.sdk ./
-          rm -rf "$TMP" master.zip
+          unzip -q master.zip
+          mv sdks-master/*.sdk ./
+          rm -rf master.zip sdks-master
           echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
       - name: Build Tweak
