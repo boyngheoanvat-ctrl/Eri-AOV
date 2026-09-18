@@ -40,16 +40,15 @@ jobs:
           rm -rf "$TMP" master.zip
           echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: ✅ Tải libdobby.a — LINK ĐÚNG CHÍNH THỨC
+      - name: ✅ Tải libdobby.a — Đúng đường dẫn từ log
         run: |
           mkdir -p lib
           cd lib
-          # Link chính thức từ Release của Dobby (.tar.gz không phải .tar.xz)
           curl -L -o dobby.tar.gz https://github.com/jmpews/Dobby/releases/download/latest/dobby-iphoneos-all.tar.gz
           tar -xzvf dobby.tar.gz
-          # Lấy phiên bản universal (arm64 + arm64e)
-          cp universal/libdobby.a ./libdobby.a
-          rm -rf dobby.tar.gz include universal
+          # Dùng arm64 — khớp với ARCHS = arm64 trong Makefile
+          cp build/iphoneos/arm64/libdobby.a ./libdobby.a
+          rm -rf dobby.tar.gz build
           ls -la libdobby.a
 
       - name: Build Tweak
