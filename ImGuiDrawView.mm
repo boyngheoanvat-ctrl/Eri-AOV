@@ -14,7 +14,9 @@
 #import <stdio.h>
 #import <string.h>
 
-// ===== KHAI BÁO HÀM =====
+// ==============================================
+// KHAI BÁO HÀM
+// ==============================================
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -30,21 +32,44 @@ extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-// ✅ SỬA: Macro LOGI đơn giản, truyền biến trực tiếp được
+// Macro LOGI đơn giản, không lỗi
 #define LOGI(fmt, ...) NSLog(@"[MOD] " fmt, ##__VA_ARGS__)
 
-#define kWidth  [UIScreen mainScreen].bounds.size.width
-#define kHeight [UIScreen mainScreen].bounds.size.height
-#define kScale  [UIScreen mainScreen].scale
+#define kWidth   [UIScreen mainScreen].bounds.size.width
+#define kHeight  [UIScreen mainScreen].bounds.size.height
+#define kScale   [UIScreen mainScreen].scale
 
 using namespace IL2CPP;
 
-// ===== BIẾN BẠN YÊU CẦU =====
+// ==============================================
+// BIẾN TOÀN CỤC
+// ==============================================
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
+bool MenDeal = false;
+bool camHookActive = false;
+float SetFieldOfView = 6.0f;
+bool showUltActive = false;
+static bool s_ultApplied = false;
+bool mapActive = false;
+static bool s_mapApplied = false;
+bool camXaActive = false;
+static bool s_camXaApplied = false;
 
-// ===== HÀM TÌM BASE =====
+typedef float (*fn_cam)(void* _this, int type);
+static fn_cam _cam = nullptr;
+typedef void (*fn_Update)(void* _this);
+static fn_Update _Update = nullptr;
+typedef void (*fn_highrate)(void* _this);
+static fn_highrate _highrate = nullptr;
+
+static const char* const targetLibName = "UnityFramework";
+static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
+
+// ==============================================
+// HÀM TÌM BASE ADDRESS
+// ==============================================
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
     uint32_t cnt = _dyld_image_count();
@@ -59,21 +84,23 @@ uintptr_t get_lib_base(const char* libName) {
     return base;
 }
 
-static const char* const targetLibName = "UnityFramework";
-static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
-
-// ===== HÀM HỖ TRỢ PATCH =====
+// ==============================================
+// HÀM HỖ TRỢ PATCH BỘ NHỚ
+// ==============================================
 static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
-    vm_prot_t old;
-    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
+    vm_prot_t oldProt;
+    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
+                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
         return false;
     memcpy(addr, data, len);
-    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
+    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
+                       VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
 }
 
 static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
     size_t len = strlen(hexStr);
-    if (len >= 2 && hexStr[0] == '0' && (hexStr[1] == 'x' || hexStr[1] == 'X')) hexStr += 2;
+    if (len >= 2 && hexStr[0] == '0' && (hexStr[1] == 'x' || hexStr[1] == 'X'))
+        hexStr += 2;
     len = strlen(hexStr);
     
     size_t byteCount = 0;
@@ -81,10 +108,9 @@ static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
     char byteStr[3] = {0};
     for (size_t i = 0; i < len && byteCount < maxLen; i += 2) {
         byteStr[0] = hexStr[i];
-        byteStr[1] = hexStr[i+1] ? hexStr[i+1] : '0';
-        if (sscanf(byteStr, "%02x", &byteVal) == 1) {
+        byteStr[1] = (i+1 < len) ? hexStr[i+1] : '0';
+        if (sscanf(byteStr, "%02x", &byteVal) == 1)
             outBuf[byteCount++] = (uint8_t)byteVal;
-        }
     }
     return byteCount;
 }
@@ -116,25 +142,9 @@ static void RestorePatch(uintptr_t rva, const char* hex) {
     DeactiveCodePatch(kFW, rva, hex);
 }
 
-// ========== BIẾN MODULE ==========
-bool MenDeal = false;
-bool camHookActive = false;
-float SetFieldOfView = 6.0f;
-bool showUltActive = false;
-static bool s_ultApplied = false;
-bool mapActive = false;
-static bool s_mapApplied = false;
-bool camXaActive = false;
-static bool s_camXaApplied = false;
-
-typedef float (*fn_cam)(void* _this, int type);
-static fn_cam _cam = nullptr;
-typedef void (*fn_Update)(void* _this);
-static fn_Update _Update = nullptr;
-typedef void (*fn_highrate)(void* _this);
-static fn_highrate _highrate = nullptr;
-
-// ========== CAMERA HOOK ==========
+// ==============================================
+// CAMERA HOOK
+// ==============================================
 float cam(void* _this, int type) {
     if (!_cam) return 0.0f;
     return (camHookActive || featureHookToggle) ? SetFieldOfView : _cam(_this, type);
@@ -142,7 +152,9 @@ float cam(void* _this, int type) {
 void Update(void* _this) { if (_Update) _Update(_this); }
 void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
-// ========== ANTIBAN ==========
+// ==============================================
+// ANTI-BAN TỰ ĐỘNG
+// ==============================================
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
@@ -151,37 +163,39 @@ static void ApplyAntiBanPatches() {
     DeactiveCodePatch(kFW, 0x6C46220, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x6C45E70, "0x000080D2C0035FD6");
     DeactiveCodePatch(kFW, 0x6C462B8, "0x000080D2C0035FD6");
-    LOGI(@"✅ AntiBan đã áp dụng tự động");
+    LOGI(@"✅ AntiBan đã sẵn sàng");
 }
 
-// ========== HACK THREAD ==========
+// ==============================================
+// HACK THREAD — CHỜ NẠP LIB
+// ==============================================
 void *hack_thread(void *) {
-    LOGI(@"Hack thread started. Searching for lib...");
+    LOGI(@"Thread khởi động, đang tìm lib...");
 
     do {
         il2cppBase = get_lib_base(targetLibName);
-        if (il2cppBase == 0) {
+        if (il2cppBase == 0)
             il2cppBase = get_lib_base("UnityFramework");
-        }
         usleep(500000);
     } while (il2cppBase == 0);
 
-    // ✅ SỬA: Truyền trực tiếp định dạng, không dùng buf trung gian
-    LOGI(@"Lib found at: %p", (void*)il2cppBase);
+    LOGI(@"✅ Lib tìm thấy tại: %p", (void*)il2cppBase);
 
     ApplyAntiBanPatches();
     
     sleep(2);
     dispatch_async(dispatch_get_main_queue(), ^{
-        DobbyHook((void*)UF(0x51C4048), (void*)cam, (void**)&_cam);
-        DobbyHook((void*)UF(0x51C2C04), (void*)Update, (void**)&_Update);
-        DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
-        LOGI(@"✅ Camera hooks đã sẵn sàng");
+        DobbyHook((void*)UF(0x51C4048), (void*)cam,       (void**)&_cam);
+        DobbyHook((void*)UF(0x51C2C04), (void*)Update,     (void**)&_Update);
+        DobbyHook((void*)UF(0x51C46A0), (void*)highrate,   (void**)&_highrate);
+        LOGI(@"✅ Tất cả Hook đã sẵn sàng");
     });
     return nullptr;
 }
 
-// ========== INTERFACE ==========
+// ==============================================
+// INTERFACE MENU
+// ==============================================
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
 @property (nonatomic, assign) BOOL touchDown;
@@ -189,7 +203,7 @@ void *hack_thread(void *) {
 
 @implementation ImGuiDrawView
 
-+ (void)showMenu:(BOOL)open { MenDeal = open; }
++ (void)showMenu:(BOOL)open   { MenDeal = open; }
 + (void)showChange:(BOOL)open { MenDeal = open; }
 
 - (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
@@ -201,13 +215,16 @@ void *hack_thread(void *) {
 - (void)commonInit {
     self.device = MTLCreateSystemDefaultDevice();
     self.cmdQueue = [self.device newCommandQueue];
+    
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
     ImGui_ImplMetal_Init(self.device);
     
-    pthread_t th; pthread_create(&th, nullptr, hack_thread, nullptr); pthread_detach(th);
+    pthread_t th;
+    pthread_create(&th, nullptr, hack_thread, nullptr);
+    pthread_detach(th);
 }
 
 - (void)loadView {
@@ -226,19 +243,22 @@ void *hack_thread(void *) {
     [self.view addSubview:self.mtkView];
 }
 
-#pragma mark - XỬ LÝ CHẠM
+// ==============================================
+// XỬ LÝ CHẠM MÀN HÌNH
+// ==============================================
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint p = [[touches anyObject] locationInView:self.view];
     if (touches.count >= 3) { MenDeal = !MenDeal; return; }
     if (MenDeal) {
         ImGuiIO& io = ImGui::GetIO();
         io.MousePos = ImVec2(p.x, p.y);
-        io.MouseDown[0] = YES;
+        io.MouseDown[0] = true;
         self.touchDown = YES;
         return;
     }
     [super touchesBegan:touches withEvent:event];
 }
+
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint p = [[touches anyObject] locationInView:self.view];
     if (MenDeal && self.touchDown) {
@@ -247,19 +267,23 @@ void *hack_thread(void *) {
     }
     [super touchesMoved:touches withEvent:event];
 }
+
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (MenDeal) {
-        ImGui::GetIO().MouseDown[0] = NO;
+        ImGui::GetIO().MouseDown[0] = false;
         self.touchDown = NO;
         return;
     }
     [super touchesEnded:touches withEvent:event];
 }
+
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     [self touchesEnded:touches withEvent:event];
 }
 
-#pragma mark - RENDER
+// ==============================================
+// RENDER MENU
+// ==============================================
 - (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
@@ -358,4 +382,5 @@ void *hack_thread(void *) {
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {}
+
 @end
