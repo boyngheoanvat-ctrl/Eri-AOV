@@ -3,7 +3,7 @@ Name: 34306jit
 Depends: mobilesubstrate
 Version: 2.1
 Architecture: arm64
-Description: Hỗ trợ tất cả iPhone 64-bit (chế độ tương thích)
+Description: Hỗ trợ tất cả iPhone 64-bit
 Maintainer: boyngheoanvat
 Author: boyngheoanvat
 Section: Tweaks
