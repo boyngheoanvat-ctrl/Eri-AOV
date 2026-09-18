@@ -2,44 +2,62 @@ name: Build Tweak
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
 
-    - name: Set up Theos
-      run: |
-        git clone --depth=1 https://github.com/theos/theos.git theos
-        export THEOS="$GITHUB_WORKSPACE/theos"
-        echo "THEOS=$THEOS" >> $GITHUB_ENV
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            build-essential git perl libssl-dev curl wget zip unzip xz-utils libtinfo6
 
-    - name: Fix & Download SDKs
-      run: |
-        export THEOS="$GITHUB_WORKSPACE/theos"
-        # Xóa thư mục nếu tồn tại nhưng trống/lỗi
-        if [ -d "$THEOS/sdks" ] && [ -z "$(ls -A $THEOS/sdks)" ]; then
-          rm -rf "$THEOS/sdks"
-        fi
-        # Tải SDKs nếu chưa có
-        if [ ! -d "$THEOS/sdks" ]; then
-          git clone --depth=1 https://github.com/theos/sdks.git "$THEOS/sdks"
-        fi
-        echo "SDKs available:"
-        ls -la "$THEOS/sdks/"
+      - name: Setup Theos
+        run: |
+          git clone --depth=1 --recursive https://github.com/theos/theos.git "$GITHUB_WORKSPACE/theos"
+          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update && sudo apt-get install -y build-essential git libplist-dev libcurl4-openssl-dev
+      - name: Install Linux Toolchain
+        run: |
+          cd "$GITHUB_WORKSPACE/theos"
+          curl -sL https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz | tar -xJvf - -C toolchain/
 
-    - name: Build
-      run: |
-        export THEOS="$GITHUB_WORKSPACE/theos"
-        make clean
-        make all
+      - name: Download & Install SDK — Đúng chuẩn
+        run: |
+          mkdir -p "$THEOS/sdks"
+          cd "$THEOS/sdks"
+          curl -LO https://github.com/theos/sdks/archive/refs/heads/master.zip
+          TMP=$(mktemp -d)
+          unzip -q master.zip -d "$TMP"
+          mv "$TMP"/sdks-master/*.sdk ./
+          rm -rf "$TMP" master.zip
+          ls -la
+          echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
+
+      - name: Build — arm64 only
+        run: |
+          export THEOS="$GITHUB_WORKSPACE/theos"
+          export THEOS_SDK="iPhoneOS15.6.sdk"
+          make package
+
+      - name: Upload DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: 34306jit-deb
+          path: packages/*.deb
+          retention-days: 7
+
+      - name: Upload Dylib
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: 34306jit-dylib
+          path: .theos/obj/arm64/*.dylib
+          retention-days: 7
