@@ -69,51 +69,40 @@ static uintptr_t UF(uintptr_t rva) {
 }
 
 // ==================================================
-// ========== 3 HOOK ĐÚNG 100% TỪ dump.cs ==========
+// ========== 3 HOOK ĐÚNG 100% — AN TOÀN ============
 // ==================================================
 
 // 1. GetCameraHeightRateValue(int type) : float
-// RVA: 0x51C4048 ✅
 typedef float (*fn_GetCameraHeightRateValue)(void* _this, int type);
 fn_GetCameraHeightRateValue orig_GetCameraHeightRateValue = nullptr;
 
 float hook_GetCameraHeightRateValue(void* _this, int type) {
-    // Luôn gọi hàm gốc → không đen màn hình
-    float original = 2.0f;
-    if (orig_GetCameraHeightRateValue) {
-        original = orig_GetCameraHeightRateValue(_this, type);
+    if (!orig_GetCameraHeightRateValue) {
+        return 0.0f;
     }
-
-    // Bật hook → trả giá trị tùy chỉnh
+    float original = orig_GetCameraHeightRateValue(_this, type);
     if (featureHookToggle) {
         return SetFieldOfView;
     }
-
-    // Tắt hook → trả giá trị gốc y nguyên
     return original;
 }
 
 // 2. Update() : void
-// RVA: 0x51C2C04 ✅
 typedef void (*fn_Update)(void* _this);
 fn_Update orig_Update = nullptr;
 
 void hook_Update(void* _this) {
-    // LUÔN gọi hàm gốc — game cần cập nhật liên tục
-    if (orig_Update) {
-        orig_Update(_this);
-    }
+    if (!orig_Update) return;
+    orig_Update(_this);
 }
 
 // 3. OnCameraHeightChanged() : void
-// RVA: 0x51C46A0 ✅
 typedef void (*fn_OnCameraHeightChanged)(void* _this);
 fn_OnCameraHeightChanged orig_OnCameraHeightChanged = nullptr;
 
 void hook_OnCameraHeightChanged(void* _this) {
-    if (orig_OnCameraHeightChanged) {
-        orig_OnCameraHeightChanged(_this);
-    }
+    if (!orig_OnCameraHeightChanged) return;
+    orig_OnCameraHeightChanged(_this);
 }
 
 // ========== HOOK THREAD ==========
@@ -128,42 +117,33 @@ static void* hack_thread(void*) {
         usleep(500000);
     } while (il2cppBase == 0);
 
-    LOGI(@"✅ Tìm thấy UnityFramework tại: 0x%lx", il2cppBase);
+    LOGI(@"Tìm thấy UnityFramework");
+    sleep(3);
+    LOGI(@"Bắt đầu cài đặt hook...");
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        // === RVA ĐÃ XÁC NHẬN TỪ dump.cs ===
-        uintptr_t rva_GetCam = 0x51C4048;    // GetCameraHeightRateValue
-        uintptr_t rva_Update  = 0x51C2C04;    // Update
-        uintptr_t rva_OnCam   = 0x51C46A0;    // OnCameraHeightChanged
+        uintptr_t rva_GetCam = 0x51C4048;
+        uintptr_t rva_Update  = 0x51C2C04;
+        uintptr_t rva_OnCam   = 0x51C46A0;
 
         void* pGetCam = (void*)UF(rva_GetCam);
         void* pUpdate = (void*)UF(rva_Update);
         void* pOnCam  = (void*)UF(rva_OnCam);
 
-        LOGI(@"Địa chỉ hook:");
-        LOGI(@"  GetCam: %p", pGetCam);
-        LOGI(@"  Update: %p", pUpdate);
-        LOGI(@"  OnCam:  %p", pOnCam);
-
-        // Hook 1: GetCameraHeightRateValue
         if (pGetCam && !orig_GetCameraHeightRateValue) {
             DobbyHook(pGetCam, (void*)hook_GetCameraHeightRateValue,
                      (void**)&orig_GetCameraHeightRateValue);
-            LOGI(@"✅ Hook GetCameraHeightRateValue OK");
+            LOGI(@"Hook Camera OK");
         }
-
-        // Hook 2: Update
         if (pUpdate && !orig_Update) {
             DobbyHook(pUpdate, (void*)hook_Update,
                      (void**)&orig_Update);
-            LOGI(@"✅ Hook Update OK");
+            LOGI(@"Hook Update OK");
         }
-
-        // Hook 3: OnCameraHeightChanged
         if (pOnCam && !orig_OnCameraHeightChanged) {
             DobbyHook(pOnCam, (void*)hook_OnCameraHeightChanged,
                      (void**)&orig_OnCameraHeightChanged);
-            LOGI(@"✅ Hook OnCameraHeightChanged OK");
+            LOGI(@"Hook OnCam OK");
         }
     });
 
@@ -217,7 +197,7 @@ static void* hack_thread(void*) {
 - (void)touchesEnded:(NSSet *)t withEvent:(UIEvent *)e { [self updateIO:e]; }
 - (void)touchesCancelled:(NSSet *)t withEvent:(UIEvent *)e { [self updateIO:e]; }
 
-#pragma mark - RENDER
+#pragma mark - Render
 - (void)drawInMTKView:(MTKView*)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
@@ -236,7 +216,6 @@ static void* hack_thread(void*) {
     if (MenDeal && ImGui::Begin("Menu AOV", &MenDeal)) {
         if (ImGui::BeginTabBar("TabBar")) {
             
-            // === CAMERA ===
             if (ImGui::BeginTabItem("Camera")) {
                 static bool wasToggle = false;
                 ImGui::Checkbox("Enable Hook", &featureHookToggle);
@@ -249,13 +228,9 @@ static void* hack_thread(void*) {
                     }
                     wasToggle = featureHookToggle;
                 }
-                char buf[64];
-                snprintf(buf, sizeof(buf), "Base: 0x%lx", il2cppBase);
-                ImGui::TextDisabled("%s", buf);
                 ImGui::EndTabItem();
             }
             
-            // === SHOW ULT ===
             if (ImGui::BeginTabItem("Show Ult")) {
                 static bool ShowUlt = false;
                 static bool wasUlt = false;
@@ -271,7 +246,6 @@ static void* hack_thread(void*) {
                 ImGui::EndTabItem();
             }
             
-            // === MAP ===
             if (ImGui::BeginTabItem("Map")) {
                 static bool Map = false;
                 static bool wasMap = false;
@@ -294,7 +268,6 @@ static void* hack_thread(void*) {
     ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cmd, enc);
     [enc endEncoding];
     [cmd presentDrawable:view.currentDrawable];
-    [cmd commit];
 }
 
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {}
