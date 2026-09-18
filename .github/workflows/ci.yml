@@ -9,12 +9,46 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
 
-      - name: Build with Theos
-        uses: theos/github-action@main
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            build-essential \
+            git \
+            perl \
+            libssl-dev \
+            curl \
+            wget \
+            zip \
+            liblzma-dev
+
+      - name: Setup Theos
+        run: |
+          git clone --depth=1 https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
+          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+
+      - name: Setup SDK — Cách chuẩn, không lỗi
+        run: |
+          cd $GITHUB_WORKSPACE/theos/sdks
+          wget -q https://github.com/theos/sdks/releases/download/1.0/iPhoneOS15.2.sdk.tar.xz
+          tar -xf iPhoneOS15.2.sdk.tar.xz
+          echo "THEOS_SDK=iPhoneOS15.2.sdk" >> $GITHUB_ENV
+
+      - name: Build
+        run: |
+          export THEOS=$GITHUB_WORKSPACE/theos
+          make clean
+          make package THEOS=$THEOS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          sdk: iphoneos15.2
-          make-args: clean package
+          name: EriMod-Build
+          path: |
+            packages/*.deb
+            packages/*.ipa
+          retention-days: 7
