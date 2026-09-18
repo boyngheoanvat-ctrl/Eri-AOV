@@ -40,17 +40,6 @@ jobs:
           rm -rf "$TMP" master.zip
           echo "THEOS_SDK=iPhoneOS15.6.sdk" >> $GITHUB_ENV
 
-      - name: Tải Dobby (arm64) + header
-        run: |
-          mkdir -p lib
-          cd lib
-          curl -L -o dobby.tar.gz https://github.com/jmpews/Dobby/releases/download/latest/dobby-iphoneos-all.tar.gz
-          tar -xzvf dobby.tar.gz
-          cp build/iphoneos/arm64/libdobby.a ./
-          cp build/iphoneos/dobby.h ./
-          rm -rf dobby.tar.gz build
-          ls -la
-
       - name: Build Tweak
         run: |
           export THEOS="$GITHUB_WORKSPACE/theos"
