@@ -131,46 +131,38 @@ static void DrawESP() {
     ImDrawList* drawList = ImGui::GetForegroundDrawList();
     if (!drawList) return;
 
-    // === VÍ DỤ ESP — Vẽ đường kẻ + khung tham chiếu ===
-    // Khi có địa chỉ lấy tọa độ thực, thay phần này bằng dữ liệu từ game
     static float demoAngle = 0.0f;
     demoAngle += 0.02f;
     
-    // Vị trí trung tâm màn hình
     ImVec2 center = ImVec2(kWidth / 2.0f, kHeight / 2.0f);
     
-    // Vẽ demo: 3 "kẻ địch" di chuyển tròn — thay bằng vòng lặp lấy từ danh sách thật
     float enemyPositions[3][2] = {
         {center.x + cosf(demoAngle) * 200, center.y + sinf(demoAngle) * 150},
         {center.x + cosf(demoAngle + 2.094f) * 250, center.y + sinf(demoAngle + 2.094f) * 180},
         {center.x + cosf(demoAngle + 4.188f) * 180, center.y + sinf(demoAngle + 4.188f) * 220}
     };
-    const char* enemyNames[3] = {"敌1", "敌2", "敌3"};
+    const char* enemyNames[3] = {"Enemy 1", "Enemy 2", "Enemy 3"};
     float enemyDistances[3] = {15.5f, 22.3f, 18.7f};
 
     for (int i = 0; i < 3; i++) {
         ImVec2 pos = ImVec2(enemyPositions[i][0], enemyPositions[i][1]);
         
-        // Đường kẻ từ tâm màn hình đến địch
         if (ESP_ShowLine) {
             drawList->AddLine(center, pos, IM_COL32(255, 50, 50, 200), 2.0f);
         }
         
-        // Khung bao quanh địch
         if (ESP_ShowBox) {
             ImVec2 boxMin = ImVec2(pos.x - 30, pos.y - 45);
             ImVec2 boxMax = ImVec2(pos.x + 30, pos.y + 45);
             drawList->AddRect(boxMin, boxMax, IM_COL32(255, 50, 50, 220), 3.0f, 0, 2.0f);
         }
         
-        // Tên
         if (ESP_ShowName) {
             char nameBuf[64];
             snprintf(nameBuf, sizeof(nameBuf), "%s", enemyNames[i]);
             drawList->AddText(ImVec2(pos.x - 25, pos.y - 60), IM_COL32(255, 255, 255, 255), nameBuf);
         }
         
-        // Khoảng cách
         if (ESP_ShowDistance) {
             char distBuf[64];
             snprintf(distBuf, sizeof(distBuf), "%.1fm", enemyDistances[i]);
@@ -202,6 +194,11 @@ static void DrawESP() {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     ImGui::StyleColorsDark();
+    
+    // ✅ SỬA: Đảm bảo kích thước màn hình chính xác
+    io.DisplaySize = ImVec2(kWidth, kHeight);
+    io.DisplayFramebufferScale = ImVec2(kScale, kScale);
+    
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
     ImGui_ImplMetal_Init(_device);
 
@@ -223,27 +220,40 @@ static void DrawESP() {
     self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
     self.mtkView.opaque = NO;
     self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    
+    // ✅ SỬA: LUÔN BẬT tương tác — không tắt nữa
+    self.mtkView.userInteractionEnabled = YES;
+    
     [self.view addSubview:self.mtkView];
 }
 
 #pragma mark - CHẠM 3 NGÓN → BẬT/TẮT MENU
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // ✅ Chỉ chuyển trạng thái menu khi chạm 3 ngón
     if (touches.count >= 3) {
         MenDeal = !MenDeal;
         LOGI(@"Menu: %@", MenDeal ? @"HIỆN" : @"ẨN");
+        return; // ✅ Không chuyển sự kiện xuống game khi bật/tắt menu
     }
+    
+    // ✅ Khi menu HIỆN → KHÔNG chuyển chạm xuống game (để nhấn được nút menu)
+    if (MenDeal) return;
+    
     [super touchesBegan:touches withEvent:event];
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (MenDeal) return; // Menu hiện → không chuyển xuống game
     [super touchesMoved:touches withEvent:event];
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (MenDeal) return; // Menu hiện → không chuyển xuống game
     [super touchesEnded:touches withEvent:event];
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (MenDeal) return; // Menu hiện → không chuyển xuống game
     [super touchesCancelled:touches withEvent:event];
 }
 
@@ -253,8 +263,6 @@ static void DrawESP() {
     io.DisplaySize = ImVec2(kWidth, kHeight);
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
     io.DeltaTime = 1.0f / 60.0f;
-
-    self.mtkView.userInteractionEnabled = MenDeal;
 
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (!pass) return;
@@ -268,7 +276,7 @@ static void DrawESP() {
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
-    // === VẼ ESP — LUÔN VẼ KHI BẬT ===
+    // === VẼ ESP ===
     DrawESP();
 
     // === MENU CHÍNH ===
@@ -287,7 +295,6 @@ static void DrawESP() {
                     ImGui::EndTabItem();
                 }
 
-                // === TAB ESP MỚI ===
                 if (ImGui::BeginTabItem("ESP")) {
                     ImGui::Checkbox("Enable ESP", &ESP_Enable);
                     ImGui::Separator();
@@ -296,8 +303,7 @@ static void DrawESP() {
                     ImGui::Checkbox("Show Box", &ESP_ShowBox);
                     ImGui::Checkbox("Show Line", &ESP_ShowLine);
                     ImGui::Spacing();
-                    ImGui::TextColored(ImVec4(1, 1, 0, 1), "⚠️ Demo mode — hiển thị mẫu");
-                    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.8f, 1), "Khi có địa chỉ lấy tọa độ sẽ cập nhật thật");
+                    ImGui::TextColored(ImVec4(1, 1, 0, 1), "Demo — update with real data");
                     ImGui::EndTabItem();
                 }
                 
