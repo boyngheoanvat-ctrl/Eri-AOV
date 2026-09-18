@@ -12,9 +12,17 @@
 #import "IMGUI/zzz.h"
 #import "il2cpp.h"
 
-// ===== KHAI BÁO HÀM =====
-extern void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex);
-extern void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex);
+// ✅ SỬA: extern "C" để không bị xáo trộn tên hàm khi liên kết
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex);
+void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex);
+
+#ifdef __cplusplus
+}
+#endif
 
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
@@ -128,7 +136,7 @@ static void* hack_thread(void*) {
     return nullptr;
 }
 
-// ✅ CHỈ thêm property CHƯA có trong .h — BỎ device & cmdQueue đã khai báo
+// Chỉ thêm property chưa có trong .h
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
 @property (nonatomic, assign) BOOL touchDown;
@@ -146,7 +154,6 @@ static void* hack_thread(void*) {
 }
 
 - (void)commonInit {
-    // device & cmdQueue đã có từ .h → dùng trực tiếp
     self.device = MTLCreateSystemDefaultDevice();
     self.cmdQueue = [self.device newCommandQueue];
     
