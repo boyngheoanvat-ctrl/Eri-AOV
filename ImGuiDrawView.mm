@@ -26,12 +26,12 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 using namespace IL2CPP;
 
-// ========== BIẾN TOÀN CỤC — ĐỦ HẾT & ĐỊNH NGHĨA THỰC ==========
+// ========== BIẾN TOÀN CỤC ==========
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
 bool MenDeal = true;
-float SetFieldOfView = 6.0f;  // ✅ Định nghĩa thực — không còn lỗi linker
+float SetFieldOfView = 6.0f;
 
 // ========== LẤY ĐỊA CHỈ BASE ==========
 static const char* kTargetLibName = OBFUSCATE("UnityFramework");
@@ -73,7 +73,7 @@ typedef float (*fn_GetCamHeight)(void*);
 fn_GetCamHeight orig_GetCamHeight = nullptr;
 float hook_GetCamHeight(void* _this) {
     if (featureHookToggle) {
-        return SetFieldOfView; // ✅ Dùng trực tiếp biến toàn cục
+        return SetFieldOfView;
     }
     return orig_GetCamHeight ? orig_GetCamHeight(_this) : 2.0f;
 }
@@ -192,9 +192,13 @@ static void* hack_thread(void*) {
             if (ImGui::BeginTabItem("Camera")) {
                 static bool wasToggle = false;
                 ImGui::Checkbox("Enable Hook", &featureHookToggle);
-                ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f); // ✅ Dùng trực tiếp
+                ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f);
                 if (featureHookToggle != wasToggle) {
-                    LOGI(featureHookToggle ? @"Hook ON" : @"Hook OFF");
+                    if (featureHookToggle) {
+                        LOGI(@"Hook ON");
+                    } else {
+                        LOGI(@"Hook OFF");
+                    }
                     wasToggle = featureHookToggle;
                 }
                 char buf[64];
