@@ -30,11 +30,10 @@ extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
-#ifndef ENCRYPTOFFSET
-#define ENCRYPTOFFSET(hexStr) ((uintptr_t)strtoull((hexStr) + 2, NULL, 16))
+#ifndef OBFUSCATE
+#define OBFUSCATE(s) (s)
 #endif
 
-#define OBFUSCATE(s) (s)
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
 
 #define kWidth  [UIScreen mainScreen].bounds.size.width
@@ -43,26 +42,37 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 
 using namespace IL2CPP;
 
-// ===== TRIỂN KHAI HÀM TRỰC TIẾP =====
+// ===== BIẾN BẠN YÊU CẦU =====
+bool featureHookToggle = false;   // ✅ Đã thêm
+void *instanceBtn = nullptr;      // ✅ Đã thêm
+uintptr_t il2cppBase = 0;         // ✅ Đã thêm — toàn cục như cũ
+
+// ===== HÀM TÌM BASE — FIX ẨN LIB (phiên bản iOS) =====
+uintptr_t get_lib_base(const char* libName) {
+    uintptr_t base = 0;
+    uint32_t cnt = _dyld_image_count();
+    for (uint32_t i = 0; i < cnt; i++) {
+        const char* name = _dyld_get_image_name(i);
+        if (!name) continue;
+        // Tìm chính xác hoặc tên rút gọn
+        if (strstr(name, libName)) {
+            base = (uintptr_t)_dyld_get_image_header(i);
+            break;
+        }
+    }
+    return base;
+}
+
+static const char* const targetLibName = "UnityFramework";
+static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
+
+// ===== HÀM HỖ TRỢ PATCH =====
 static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
     vm_prot_t old;
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
         return false;
     memcpy(addr, data, len);
     return vm_protect(mach_task_self(), (vm_address_t)addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
-}
-
-static uintptr_t getFrameworkBase(const char* fwName) {
-    uintptr_t base = 0;
-    uint32_t cnt = _dyld_image_count();
-    for (uint32_t i = 0; i < cnt; i++) {
-        const char* name = _dyld_get_image_name(i);
-        if (name && strstr(name, fwName)) {
-            base = (uintptr_t)_dyld_get_image_header(i);
-            break;
-        }
-    }
-    return base;
 }
 
 static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
@@ -84,7 +94,7 @@ static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
 }
 
 void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex) {
-    uintptr_t base = getFrameworkBase(frameworkPath);
+    uintptr_t base = get_lib_base(frameworkPath);
     if (!base) return;
     uint8_t bytes[16] = {0};
     size_t len = hexToBytes(originalHex, bytes, sizeof(bytes));
@@ -92,14 +102,26 @@ void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex)
 }
 
 void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex) {
-    uintptr_t base = getFrameworkBase(frameworkPath);
+    uintptr_t base = get_lib_base(frameworkPath);
     if (!base) return;
     uint8_t bytes[16] = {0};
     size_t len = hexToBytes(originalHex, bytes, sizeof(bytes));
     if (len > 0) PatchMemoryEx((void*)(base + rva), bytes, len);
 }
 
-// ========== BIẾN TOÀN CỤC ==========
+// ===== TRỞ ĐỊA CHỈ + RVA =====
+static uintptr_t UF(uintptr_t rva) {
+    return il2cppBase ? il2cppBase + rva : 0;
+}
+
+static void ApplyPatch(uintptr_t rva, const char* hex) {
+    Hook1110(kFW, rva, hex);
+}
+static void RestorePatch(uintptr_t rva, const char* hex) {
+    DeactiveCodePatch(kFW, rva, hex);
+}
+
+// ========== BIẾN MODULE ==========
 bool MenDeal = false;
 bool camHookActive = false;
 float SetFieldOfView = 6.0f;
@@ -117,32 +139,15 @@ static fn_Update _Update = nullptr;
 typedef void (*fn_highrate)(void* _this);
 static fn_highrate _highrate = nullptr;
 
-static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
-
-uintptr_t get_lib_base(const char* libName) {
-    return getFrameworkBase(libName);
-}
-
-static uintptr_t il2cppBase = 0;
-static uintptr_t UF(uintptr_t rva) {
-    if (!il2cppBase) il2cppBase = get_lib_base("UnityFramework");
-    return il2cppBase ? il2cppBase + rva : 0;
-}
-
-static void ApplyPatch(uintptr_t rva, const char* hex) {
-    Hook1110(kFW, rva, hex);
-}
-static void RestorePatch(uintptr_t rva, const char* hex) {
-    DeactiveCodePatch(kFW, rva, hex);
-}
-
+// ========== CAMERA HOOK ==========
 float cam(void* _this, int type) {
     if (!_cam) return 0.0f;
-    return camHookActive ? SetFieldOfView : _cam(_this, type);
+    return (camHookActive || featureHookToggle) ? SetFieldOfView : _cam(_this, type);
 }
 void Update(void* _this) { if (_Update) _Update(_this); }
 void highrate(void* _this) { if (_highrate) _highrate(_this); }
 
+// ========== ANTIBAN ==========
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
@@ -154,10 +159,24 @@ static void ApplyAntiBanPatches() {
     LOGI(@"✅ AntiBan đã áp dụng tự động");
 }
 
-static void* hack_thread(void*) {
-    do { il2cppBase = get_lib_base("UnityFramework"); usleep(500000); } while (!il2cppBase);
-    LOGI(@"UnityFramework OK");
+// ========== HACK THREAD — GIỮ LOGIC CỦA BẠN ==========
+void *hack_thread(void *) {
+    LOGI(OBFUSCATE("Hack thread started. Searching for lib..."));
+
+    // Vòng lặp quét lib cho đến khi tìm thấy — Fix ẩn/nạp muộn
+    do {
+        il2cppBase = get_lib_base(targetLibName);
+        if (il2cppBase == 0) {
+            // Thử tên rút gọn nếu game đổi tên
+            il2cppBase = get_lib_base("UnityFramework");
+        }
+        usleep(500000);
+    } while (il2cppBase == 0);
+
+    LOGI(OBFUSCATE("Lib found at: %p"), (void*)il2cppBase);
+
     ApplyAntiBanPatches();
+    
     sleep(2);
     dispatch_async(dispatch_get_main_queue(), ^{
         DobbyHook((void*)UF(0x51C4048), (void*)cam, (void**)&_cam);
@@ -168,6 +187,7 @@ static void* hack_thread(void*) {
     return nullptr;
 }
 
+// ========== INTERFACE ==========
 @interface ImGuiDrawView () <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
 @property (nonatomic, assign) BOOL touchDown;
@@ -192,6 +212,7 @@ static void* hack_thread(void*) {
     ImGuiIO& io = ImGui::GetIO();
     io.Fonts->AddFontFromMemoryCompressedTTF(zzz_compressed_data, zzz_compressed_size, 18.0f);
     ImGui_ImplMetal_Init(self.device);
+    
     pthread_t th; pthread_create(&th, nullptr, hack_thread, nullptr); pthread_detach(th);
 }
 
@@ -266,11 +287,16 @@ static void* hack_thread(void*) {
         ImGui::SetNextWindowSizeConstraints(ImVec2(280,200), ImVec2(kWidth*0.95f, kHeight*0.9f));
         if (ImGui::Begin("Menu AOV", &MenDeal)) {
             if (ImGui::BeginTabBar("TabBar")) {
+                
+                // === CAM KÉO + featureHookToggle ===
                 if (ImGui::BeginTabItem("Cam Kéo")) {
                     ImGui::Checkbox("Kéo Camera", &camHookActive);
+                    ImGui::Checkbox("Feature Toggle", &featureHookToggle); // ✅ Đã thêm
                     ImGui::SliderFloat("FOV", &SetFieldOfView, 0.1f, 15.0f);
                     ImGui::EndTabItem();
                 }
+                
+                // === CAM XA ===
                 if (ImGui::BeginTabItem("Cam Xa")) {
                     bool newCamXa = camXaActive;
                     if (ImGui::Checkbox("Cam Xa 3 Nấc", &newCamXa)) {
@@ -287,6 +313,8 @@ static void* hack_thread(void*) {
                     }
                     ImGui::EndTabItem();
                 }
+                
+                // === SHOW ULT ===
                 if (ImGui::BeginTabItem("Show Ult")) {
                     bool newUlt = showUltActive;
                     if (ImGui::Checkbox("Hiện Kỹ Năng", &newUlt)) {
@@ -307,6 +335,8 @@ static void* hack_thread(void*) {
                     }
                     ImGui::EndTabItem();
                 }
+                
+                // === MAP ===
                 if (ImGui::BeginTabItem("Map")) {
                     bool newMap = mapActive;
                     if (ImGui::Checkbox("Map Toàn Cục", &newMap)) {
@@ -323,6 +353,7 @@ static void* hack_thread(void*) {
                     }
                     ImGui::EndTabItem();
                 }
+                
                 ImGui::EndTabBar();
             }
             ImGui::End();
