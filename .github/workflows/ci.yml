@@ -24,32 +24,32 @@ jobs:
             curl \
             wget \
             zip \
-            xz-utils
+            xz-utils \
+            liblzma-dev
 
       - name: Setup Theos
         run: |
           git clone --depth=1 https://github.com/theos/theos.git $GITHUB_WORKSPACE/theos
           echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
 
-      - name: Create sdks folder & Download SDK
+      - name: Setup SDK
         run: |
           mkdir -p $GITHUB_WORKSPACE/theos/sdks
           cd $GITHUB_WORKSPACE/theos/sdks
           wget -q https://github.com/theos/sdks/releases/download/1.0/iPhoneOS15.2.sdk.tar.xz
           tar -xf iPhoneOS15.2.sdk.tar.xz
-          ls -la
           echo "THEOS_SDK=iPhoneOS15.2.sdk" >> $GITHUB_ENV
 
-      - name: Build
+      - name: Build 34306jit
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos
           make clean
           make package THEOS=$THEOS
 
-      - name: Upload artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: EriMod-Build
+          name: 34306jit-Build
           path: |
             packages/*.deb
             packages/*.ipa
