@@ -128,8 +128,6 @@ static void* hack_thread(void*) {
 
 // ========== IMPLEMENTATION ==========
 @interface ImGuiDrawView () <MTKViewDelegate>
-@property (nonatomic, strong) id<MTLDevice> device;
-@property (nonatomic, strong) id<MTLCommandQueue> cmdQueue;
 @property (nonatomic, strong) MTKView *mtkView;
 @end
 
@@ -144,13 +142,8 @@ static void* hack_thread(void*) {
     return self;
 }
 
-- (instancetype)initWithFrame:(CGRect)frame {
-    if (!(self = [super initWithFrame:frame])) return nil;
-    [self commonInit];
-    return self;
-}
-
 - (void)commonInit {
+    // Khởi tạo các biến instance — KHÔNG khai báo lại thuộc tính đã có trong .h
     _device = MTLCreateSystemDefaultDevice();
     _cmdQueue = [_device newCommandQueue];
     
@@ -175,7 +168,7 @@ static void* hack_thread(void*) {
     self.mtkView = [[MTKView alloc] initWithFrame:self.view.bounds];
     self.mtkView.device = self.device;
     self.mtkView.delegate = self;
-    self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0); // Trong suốt
+    self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0); // Trong suốt hoàn toàn
     self.mtkView.opaque = NO;
     self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.mtkView];
@@ -209,14 +202,14 @@ static void* hack_thread(void*) {
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
     io.DeltaTime = 1.0f / 60.0f;
 
-    // Chỉ nhận chạm khi menu hiện
+    // Chỉ nhận chạm khi menu hiện — game vẫn nhận sự kiện bình thường
     self.mtkView.userInteractionEnabled = MenDeal;
 
     id<MTLCommandBuffer> cmd = [self.cmdQueue commandBuffer];
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (!pass) return;
 
-    // ✅ Giữ nguyên khung hình game — không xóa nền
+    // ✅ Giữ nguyên khung hình game — không xóa nền → không đen màn hình
     pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
 
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
@@ -224,7 +217,7 @@ static void* hack_thread(void*) {
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
-    // === NÚT DỰ PHÒNG ===
+    // === NÚT DỰ PHÒNG HIỆN MENU ===
     if (!MenDeal) {
         ImGui::SetNextWindowPos(ImVec2(20, 20));
         if (ImGui::Begin("≡", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration)) {
