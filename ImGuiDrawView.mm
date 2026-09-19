@@ -1,6 +1,3 @@
-// ==================================================
-// 1. THƯ VIỆN & KHAI BÁO — BỌC extern "C"
-// ==================================================
 #include <stdint.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
@@ -22,26 +19,22 @@
 #endif
 
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
-
 #define kWidth   [UIScreen mainScreen].bounds.size.width
 #define kHeight  [UIScreen mainScreen].bounds.size.height
 #define kScale   [UIScreen mainScreen].scale
 
-// ✅ SỬA: Bọc extern "C" để không bị đổi tên hàm
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
-
 #ifdef __cplusplus
 }
 #endif
 
 // ==================================================
-// 2. BIẾN TOÀN CỤC
+// BIẾN TOÀN CỤC
 // ==================================================
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
@@ -58,7 +51,7 @@ bool mapActive = false;
 static bool s_mapApplied = false;
 
 // ==================================================
-// 3. TÌM LIB
+// TÌM UNITYFRAMEWORK
 // ==================================================
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
@@ -78,9 +71,10 @@ static const char* const targetLibName = "UnityFramework";
 static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
 
 // ==================================================
-// 4. PATCH BỘ NHỚ
+// PATCH BỘ NHỚ — AN TOÀN
 // ==================================================
 static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
+    if (!addr) return false;
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
                     VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
         return false;
@@ -108,7 +102,7 @@ static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
 
 void Hook1110(const char* frameworkPath, uintptr_t rva, const char* hex) {
     uintptr_t base = get_lib_base(frameworkPath);
-    if (!base) return;
+    if (!base || rva == 0) return;
     uint8_t bytes[16] = {0};
     size_t len = hexToBytes(hex, bytes, sizeof(bytes));
     if (len > 0) PatchMemoryEx((void*)(base + rva), bytes, len);
@@ -120,11 +114,11 @@ void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* hex
 static uintptr_t UF(uintptr_t rva) {
     return il2cppBase ? il2cppBase + rva : 0;
 }
-static void ApplyPatch(uintptr_t rva, const char* hex)  { Hook1110(kFW, rva, hex); }
-static void RestorePatch(uintptr_t rva, const char* hex) { Hook1110(kFW, rva, hex); }
+static void ApplyPatch(uintptr_t rva, const char* hex)  { if(il2cppBase) Hook1110(kFW, rva, hex); }
+static void RestorePatch(uintptr_t rva, const char* hex) { if(il2cppBase) Hook1110(kFW, rva, hex); }
 
 // ==================================================
-// 5. HOOK CAMERA
+// HOOK CAMERA
 // ==================================================
 typedef float (*fn_cam)(void* _this, int type); static fn_cam _cam = nullptr;
 typedef void (*fn_Update)(void* _this);          static fn_Update _Update = nullptr;
@@ -138,9 +132,10 @@ void Update(void* _this)     { if (_Update) _Update(_this); }
 void highrate(void* _this)   { if (_highrate) _highrate(_this); }
 
 // ==================================================
-// 6. ANTIBAN
+// ANTIBAN
 // ==================================================
 static void ApplyAntiBanPatches() {
+    if (!il2cppBase) return;
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
     DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
     DeactiveCodePatch(kFW, 0x4C3E394, "0xC0035FD61F2003D51F2003D5");
@@ -152,33 +147,32 @@ static void ApplyAntiBanPatches() {
 }
 
 // ==================================================
-// 7. HACK THREAD
+// KHỞI TẠO — TRÌ HOÃN AN TOÀN
 // ==================================================
-void *hack_thread(void *) {
-    LOGI(@"%s", OBFUSCATE("Hack thread started. Đang tìm UnityFramework..."));
+static bool __attribute__((constructor)) mod_init() {
+    LOGI(@"✅ Dylib đã nạp — chờ game khởi động...");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+        do {
+            il2cppBase = get_lib_base(targetLibName);
+            if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
+            if (il2cppBase == 0) usleep(500000);
+        } while (il2cppBase == 0);
 
-    do {
-        il2cppBase = get_lib_base(targetLibName);
-        if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
-        usleep(500000);
-    } while (il2cppBase == 0);
-
-    LOGI(@"%s: %p", OBFUSCATE("✅ Lib tìm thấy tại"), (void*)il2cppBase);
-
-    ApplyAntiBanPatches();
-    sleep(2);
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        DobbyHook((void*)UF(0x51C4048), (void*)cam,     (void**)&_cam);
-        DobbyHook((void*)UF(0x51C2C04), (void*)Update,   (void**)&_Update);
-        DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
-        LOGI(@"✅ Tất cả Hook đã sẵn sàng");
+        LOGI(@"✅ Lib tìm thấy tại: %p", (void*)il2cppBase);
+        ApplyAntiBanPatches();
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (UF(0x51C4048)) DobbyHook((void*)UF(0x51C4048), (void*)cam,     (void**)&_cam);
+            if (UF(0x51C2C04)) DobbyHook((void*)UF(0x51C2C04), (void*)Update,   (void**)&_Update);
+            if (UF(0x51C46A0)) DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
+            LOGI(@"✅ Hook hoàn tất");
+        });
     });
-    return nullptr;
+    return true;
 }
 
 // ==================================================
-// 8. MENU
+// MENU & GIAO DIỆN
 // ==================================================
 @interface ImGuiDrawView : UIView <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
@@ -192,7 +186,7 @@ void *hack_thread(void *) {
 + (void)load {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             ImGuiDrawView *overlay = [[ImGuiDrawView alloc] initWithFrame:[UIScreen mainScreen].bounds];
             overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             [[[UIApplication sharedApplication] keyWindow] addSubview:overlay];
@@ -230,10 +224,6 @@ void *hack_thread(void *) {
     self.mtkView.framebufferOnly = NO;
     self.mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self addSubview:self.mtkView];
-    
-    pthread_t th;
-    pthread_create(&th, nullptr, hack_thread, nullptr);
-    pthread_detach(th);
 }
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
