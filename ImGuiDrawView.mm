@@ -1,10 +1,7 @@
 // ==================================================
-// 1. KHAI BÁO HÀM HỆ THỐNG — ĐẦU TIÊN NHẤT
+// 1. THƯ VIỆN — ĐẦU TIÊN NHẤT
 // ==================================================
-extern uint32_t _dyld_image_count(void);
-extern const char* _dyld_get_image_name(uint32_t image_index);
-extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
-
+#include <stdint.h>   // ✅ SỬA: Thiếu kiểu uint32_t
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <stdio.h>
@@ -24,37 +21,37 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 #define OBFUSCATE(s) (s)
 #endif
 
-#define LOGI(fmt, ...) NSLog(@"[MOD] " fmt, ##__VA_ARGS__)
+// ✅ SỬA: LOGI dùng %s cho chuỗi OBFUSCATE
+#define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
+
 #define kWidth   [UIScreen mainScreen].bounds.size.width
 #define kHeight  [UIScreen mainScreen].bounds.size.height
 #define kScale   [UIScreen mainScreen].scale
 
+// ✅ SỬA: Khai báo hàm đúng kiểu
+extern uint32_t _dyld_image_count(void);
+extern const char* _dyld_get_image_name(uint32_t image_index);
+extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
+
 // ==================================================
-// 2. BIẾN TOÀN CỤC — ĐỦ TẤT CẢ
+// 2. BIẾN TOÀN CỤC
 // ==================================================
 bool featureHookToggle = false;
 void *instanceBtn = nullptr;
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
 
-// Camera
 bool camHookActive = false;
 float SetFieldOfView = 6.0f;
-
-// Cam Xa
 bool camXaActive = false;
 static bool s_camXaApplied = false;
-
-// Show Ult
 bool showUltActive = false;
 static bool s_ultApplied = false;
-
-// Map
 bool mapActive = false;
 static bool s_mapApplied = false;
 
 // ==================================================
-// 3. HÀM TÌM BASE ADDRESS — iOS
+// 3. TÌM LIB
 // ==================================================
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
@@ -70,11 +67,11 @@ uintptr_t get_lib_base(const char* libName) {
     return base;
 }
 
-#define targetLibName OBFUSCATE("UnityFramework")
+static const char* const targetLibName = "UnityFramework";
 static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
 
 // ==================================================
-// 4. HÀM PATCH BỘ NHỚ
+// 4. PATCH BỘ NHỚ
 // ==================================================
 static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
     if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
@@ -90,7 +87,6 @@ static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
     if (len >= 2 && hexStr[0] == '0' && (hexStr[1] == 'x' || hexStr[1] == 'X'))
         hexStr += 2;
     len = strlen(hexStr);
-    
     size_t byteCount = 0;
     unsigned int byteVal;
     char byteStr[3] = {0};
@@ -103,52 +99,39 @@ static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
     return byteCount;
 }
 
-void Hook1110(const char* frameworkPath, uintptr_t rva, const char* originalHex) {
+void Hook1110(const char* frameworkPath, uintptr_t rva, const char* hex) {
     uintptr_t base = get_lib_base(frameworkPath);
     if (!base) return;
     uint8_t bytes[16] = {0};
-    size_t len = hexToBytes(originalHex, bytes, sizeof(bytes));
+    size_t len = hexToBytes(hex, bytes, sizeof(bytes));
     if (len > 0) PatchMemoryEx((void*)(base + rva), bytes, len);
 }
-
-void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* originalHex) {
-    uintptr_t base = get_lib_base(frameworkPath);
-    if (!base) return;
-    uint8_t bytes[16] = {0};
-    size_t len = hexToBytes(originalHex, bytes, sizeof(bytes));
-    if (len > 0) PatchMemoryEx((void*)(base + rva), bytes, len);
+void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* hex) {
+    Hook1110(frameworkPath, rva, hex);
 }
 
 static uintptr_t UF(uintptr_t rva) {
     return il2cppBase ? il2cppBase + rva : 0;
 }
-
-static void ApplyPatch(uintptr_t rva, const char* hex) {
-    Hook1110(kFW, rva, hex);
-}
-static void RestorePatch(uintptr_t rva, const char* hex) {
-    DeactiveCodePatch(kFW, rva, hex);
-}
+static void ApplyPatch(uintptr_t rva, const char* hex)  { Hook1110(kFW, rva, hex); }
+static void RestorePatch(uintptr_t rva, const char* hex) { Hook1110(kFW, rva, hex); }
 
 // ==================================================
-// 5. HÀM HOOK — CAMERA
+// 5. HOOK CAMERA
 // ==================================================
-typedef float (*fn_cam)(void* _this, int type);
-static fn_cam _cam = nullptr;
-typedef void (*fn_Update)(void* _this);
-static fn_Update _Update = nullptr;
-typedef void (*fn_highrate)(void* _this);
-static fn_highrate _highrate = nullptr;
+typedef float (*fn_cam)(void* _this, int type); static fn_cam _cam = nullptr;
+typedef void (*fn_Update)(void* _this);          static fn_Update _Update = nullptr;
+typedef void (*fn_highrate)(void* _this);         static fn_highrate _highrate = nullptr;
 
 float cam(void* _this, int type) {
     if (!_cam) return 0.0f;
     return (camHookActive || featureHookToggle) ? SetFieldOfView : _cam(_this, type);
 }
-void Update(void* _this) { if (_Update) _Update(_this); }
-void highrate(void* _this) { if (_highrate) _highrate(_this); }
+void Update(void* _this)     { if (_Update) _Update(_this); }
+void highrate(void* _this)   { if (_highrate) _highrate(_this); }
 
 // ==================================================
-// 6. ANTI-BAN
+// 6. ANTIBAN
 // ==================================================
 static void ApplyAntiBanPatches() {
     LOGI(@"=== ÁP DỤNG ANTIBAN ===");
@@ -162,37 +145,35 @@ static void ApplyAntiBanPatches() {
 }
 
 // ==================================================
-// 7. HACK THREAD — CHỜ NẠP LIB
+// 7. HACK THREAD
 // ==================================================
 void *hack_thread(void *) {
-    LOGI(OBFUSCATE("Hack thread started. Đang tìm UnityFramework..."));
+    LOGI(@"%s", OBFUSCATE("Hack thread started. Đang tìm UnityFramework..."));
 
     do {
         il2cppBase = get_lib_base(targetLibName);
-        if (il2cppBase == 0) {
-            il2cppBase = get_lib_base("UnityFramework");
-        }
+        if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
         usleep(500000);
     } while (il2cppBase == 0);
 
-    LOGI(OBFUSCATE("✅ Lib tìm thấy tại: %p"), (void*)il2cppBase);
+    LOGI(@"%s: %p", OBFUSCATE("✅ Lib tìm thấy tại"), (void*)il2cppBase);
 
     ApplyAntiBanPatches();
-    
     sleep(2);
+    
     dispatch_async(dispatch_get_main_queue(), ^{
-        DobbyHook((void*)UF(0x51C4048), (void*)cam,       (void**)&_cam);
-        DobbyHook((void*)UF(0x51C2C04), (void*)Update,     (void**)&_Update);
-        DobbyHook((void*)UF(0x51C46A0), (void*)highrate,   (void**)&_highrate);
+        DobbyHook((void*)UF(0x51C4048), (void*)cam,     (void**)&_cam);
+        DobbyHook((void*)UF(0x51C2C04), (void*)Update,   (void**)&_Update);
+        DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
         LOGI(@"✅ Tất cả Hook đã sẵn sàng");
     });
     return nullptr;
 }
 
 // ==================================================
-// 8. MENU & GIAO DIỆN — CUỐI CÙNG
+// 8. MENU — ✅ SỬA: KẾ THỪA UIView
 // ==================================================
-@interface ImGuiDrawView () <MTKViewDelegate>
+@interface ImGuiDrawView : UIView <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
 @property (nonatomic, assign) BOOL touchDown;
 @property (nonatomic, strong) id<MTLDevice> device;
@@ -284,7 +265,7 @@ void *hack_thread(void *) {
     [self touchesEnded:touches withEvent:event];
 }
 
-// --- RENDER MENU ---
+// --- RENDER ---
 - (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
@@ -309,7 +290,6 @@ void *hack_thread(void *) {
         if (ImGui::Begin("Menu AOV", &MenDeal)) {
             if (ImGui::BeginTabBar("TabBar")) {
                 
-                // === TAB CAM KÉO ===
                 if (ImGui::BeginTabItem("Cam Kéo")) {
                     ImGui::Checkbox("Kéo Camera", &camHookActive);
                     ImGui::Checkbox("Feature Toggle", &featureHookToggle);
@@ -317,59 +297,44 @@ void *hack_thread(void *) {
                     ImGui::EndTabItem();
                 }
                 
-                // === TAB CAM XA ===
                 if (ImGui::BeginTabItem("Cam Xa")) {
-                    bool newCamXa = camXaActive;
-                    if (ImGui::Checkbox("Cam Xa 3 Nấc", &newCamXa)) {
-                        if (newCamXa != camXaActive) {
-                            camXaActive = newCamXa;
-                            if (camXaActive) {
-                                ApplyPatch(0x525BE48, "0x20008052C0035FD6");
-                                s_camXaApplied = true;
-                            } else if (s_camXaApplied) {
-                                RestorePatch(0x525BE48, "0x20008052C0035FD6");
-                                s_camXaApplied = false;
-                            }
+                    if (ImGui::Checkbox("Cam Xa 3 Nấc", &camXaActive)) {
+                        if (camXaActive) {
+                            ApplyPatch(0x525BE48, "0x20008052C0035FD6");
+                            s_camXaApplied = true;
+                        } else if (s_camXaApplied) {
+                            RestorePatch(0x525BE48, "0x20008052C0035FD6");
+                            s_camXaApplied = false;
                         }
                     }
                     ImGui::EndTabItem();
                 }
                 
-                // === TAB SHOW ULT ===
                 if (ImGui::BeginTabItem("Show Ult")) {
-                    bool newUlt = showUltActive;
-                    if (ImGui::Checkbox("Hiện Kỹ Năng", &newUlt)) {
-                        if (newUlt != showUltActive) {
-                            showUltActive = newUlt;
-                            if (showUltActive) {
-                                ApplyPatch(0x5BA7218, "0x20008052C0035FD6");
-                                ApplyPatch(0x6660B80, "0x20008052C0035FD6");
-                                ApplyPatch(0x6660A1C, "0x20008052C0035FD6");
-                                s_ultApplied = true;
-                            } else if (s_ultApplied) {
-                                RestorePatch(0x5BA7218, "0x20008052C0035FD6");
-                                RestorePatch(0x6660B80, "0x20008052C0035FD6");
-                                RestorePatch(0x6660A1C, "0x20008052C0035FD6");
-                                s_ultApplied = false;
-                            }
+                    if (ImGui::Checkbox("Hiện Kỹ Năng", &showUltActive)) {
+                        if (showUltActive) {
+                            ApplyPatch(0x5BA7218, "0x20008052C0035FD6");
+                            ApplyPatch(0x6660B80, "0x20008052C0035FD6");
+                            ApplyPatch(0x6660A1C, "0x20008052C0035FD6");
+                            s_ultApplied = true;
+                        } else if (s_ultApplied) {
+                            RestorePatch(0x5BA7218, "0x20008052C0035FD6");
+                            RestorePatch(0x6660B80, "0x20008052C0035FD6");
+                            RestorePatch(0x6660A1C, "0x20008052C0035FD6");
+                            s_ultApplied = false;
                         }
                     }
                     ImGui::EndTabItem();
                 }
                 
-                // === TAB MAP ===
                 if (ImGui::BeginTabItem("Map")) {
-                    bool newMap = mapActive;
-                    if (ImGui::Checkbox("Map Toàn Cục", &newMap)) {
-                        if (newMap != mapActive) {
-                            mapActive = newMap;
-                            if (mapActive) {
-                                ApplyPatch(0x4826BB8, "0x360080D2");
-                                s_mapApplied = true;
-                            } else if (s_mapApplied) {
-                                RestorePatch(0x4826BB8, "0x360080D2");
-                                s_mapApplied = false;
-                            }
+                    if (ImGui::Checkbox("Map Toàn Cục", &mapActive)) {
+                        if (mapActive) {
+                            ApplyPatch(0x4826BB8, "0x360080D2");
+                            s_mapApplied = true;
+                        } else if (s_mapApplied) {
+                            RestorePatch(0x4826BB8, "0x360080D2");
+                            s_mapApplied = false;
                         }
                     }
                     ImGui::EndTabItem();
