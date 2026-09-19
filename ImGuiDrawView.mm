@@ -9,7 +9,6 @@
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
-#import "5Toubun/dobby.h"
 #import "IMGUI/imgui.h"
 #import "IMGUI/imgui_impl_metal.h"
 #import "IMGUI/zzz.h"
@@ -34,24 +33,42 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 #endif
 
 // ==================================================
-// BIẾN TOÀN CỤC
+// CẤU TRÚC PATCH — GIỐNG HỆT ANDROID + CAM KÉO
 // ==================================================
-bool featureHookToggle = false;
-void *instanceBtn = nullptr;
+struct My_Patches {
+    uintptr_t Hackmap;
+    uintptr_t Cam1, Cam2, Cam3;
+    uintptr_t CamKéo1, CamKéo2, CamKéo3; // ✅ Thêm Cam Kéo
+    uintptr_t Unti1, Unti2, Unti3;
+    uintptr_t Lds;
+    uintptr_t An;
+    
+    const char* Hackmap_hex;
+    const char* Cam1_hex;
+    const char* Cam2_hex;
+    const char* Cam3_hex;
+    const char* CamKéo1_hex;
+    const char* CamKéo2_hex;
+    const char* CamKéo3_hex;
+    const char* Unti1_hex;
+    const char* Unti2_hex;
+    const char* Unti3_hex;
+    const char* Lds_hex;
+    const char* An_hex;
+    
+    bool Hackmap_active;
+    bool Cam3Nac_active;
+    bool CamKéo_active;
+    bool Unti_active;
+    bool Lds_active;
+    bool An_active;
+} hexPatches;
+
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
 
-bool camHookActive = false;
-float SetFieldOfView = 6.0f;
-bool camXaActive = false;
-static bool s_camXaApplied = false;
-bool showUltActive = false;
-static bool s_ultApplied = false;
-bool mapActive = false;
-static bool s_mapApplied = false;
-
 // ==================================================
-// TÌM UNITYFRAMEWORK
+// TÌM LIB
 // ==================================================
 uintptr_t get_lib_base(const char* libName) {
     uintptr_t base = 0;
@@ -67,112 +84,135 @@ uintptr_t get_lib_base(const char* libName) {
     return base;
 }
 
-static const char* const targetLibName = "UnityFramework";
-static const char* const kFW = "Frameworks/UnityFramework.framework/UnityFramework";
+#define targetLibName OBFUSCATE("UnityFramework")
 
 // ==================================================
-// PATCH BỘ NHỚ — AN TOÀN
+// PATCH BỘ NHỚ
 // ==================================================
-static bool PatchMemoryEx(void* addr, const void* data, size_t len) {
-    if (!addr) return false;
-    if (vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
-                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
-        return false;
-    memcpy(addr, data, len);
-    return vm_protect(mach_task_self(), (vm_address_t)addr, len, false,
-                       VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
-}
-
-static size_t hexToBytes(const char* hexStr, uint8_t* outBuf, size_t maxLen) {
+static bool PatchBytes(uintptr_t addr, const char* hexStr) {
+    if (!addr || !hexStr) return false;
+    
+    uint8_t bytes[32] = {0};
     size_t len = strlen(hexStr);
-    if (len >= 2 && hexStr[0] == '0' && (hexStr[1] == 'x' || hexStr[1] == 'X'))
-        hexStr += 2;
-    len = strlen(hexStr);
     size_t byteCount = 0;
     unsigned int byteVal;
     char byteStr[3] = {0};
-    for (size_t i = 0; i < len && byteCount < maxLen; i += 2) {
+    
+    for (size_t i = 0; i < len && byteCount < 32; i++) {
+        if (hexStr[i] == ' ') continue;
+        if (i+1 >= len) break;
         byteStr[0] = hexStr[i];
-        byteStr[1] = (i+1 < len) ? hexStr[i+1] : '0';
+        byteStr[1] = hexStr[i+1];
         if (sscanf(byteStr, "%02x", &byteVal) == 1)
-            outBuf[byteCount++] = (uint8_t)byteVal;
+            bytes[byteCount++] = (uint8_t)byteVal;
+        i++;
     }
-    return byteCount;
-}
-
-void Hook1110(const char* frameworkPath, uintptr_t rva, const char* hex) {
-    uintptr_t base = get_lib_base(frameworkPath);
-    if (!base || rva == 0) return;
-    uint8_t bytes[16] = {0};
-    size_t len = hexToBytes(hex, bytes, sizeof(bytes));
-    if (len > 0) PatchMemoryEx((void*)(base + rva), bytes, len);
-}
-void DeactiveCodePatch(const char* frameworkPath, uintptr_t rva, const char* hex) {
-    Hook1110(frameworkPath, rva, hex);
-}
-
-static uintptr_t UF(uintptr_t rva) {
-    return il2cppBase ? il2cppBase + rva : 0;
-}
-static void ApplyPatch(uintptr_t rva, const char* hex)  { if(il2cppBase) Hook1110(kFW, rva, hex); }
-static void RestorePatch(uintptr_t rva, const char* hex) { if(il2cppBase) Hook1110(kFW, rva, hex); }
-
-// ==================================================
-// HOOK CAMERA
-// ==================================================
-typedef float (*fn_cam)(void* _this, int type); static fn_cam _cam = nullptr;
-typedef void (*fn_Update)(void* _this);          static fn_Update _Update = nullptr;
-typedef void (*fn_highrate)(void* _this);         static fn_highrate _highrate = nullptr;
-
-float cam(void* _this, int type) {
-    if (!_cam) return 0.0f;
-    return (camHookActive || featureHookToggle) ? SetFieldOfView : _cam(_this, type);
-}
-void Update(void* _this)     { if (_Update) _Update(_this); }
-void highrate(void* _this)   { if (_highrate) _highrate(_this); }
-
-// ==================================================
-// ANTIBAN
-// ==================================================
-static void ApplyAntiBanPatches() {
-    if (!il2cppBase) return;
-    LOGI(@"=== ÁP DỤNG ANTIBAN ===");
-    DeactiveCodePatch(kFW, 0x5F88E3C, "0xC0035FD61F2003D51F2003D5");
-    DeactiveCodePatch(kFW, 0x4C3E394, "0xC0035FD61F2003D51F2003D5");
-    DeactiveCodePatch(kFW, 0x6C46CFC, "0x000080D2C0035FD6");
-    DeactiveCodePatch(kFW, 0x6C46220, "0xC0035FD61F2003D51F2003D5");
-    DeactiveCodePatch(kFW, 0x6C45E70, "0x000080D2C0035FD6");
-    DeactiveCodePatch(kFW, 0x6C462B8, "0x000080D2C0035FD6");
-    LOGI(@"✅ AntiBan đã sẵn sàng");
+    
+    if (byteCount == 0) return false;
+    
+    if (vm_protect(mach_task_self(), (vm_address_t)addr, byteCount, false,
+                    VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) != KERN_SUCCESS)
+        return false;
+    memcpy((void*)addr, bytes, byteCount);
+    return vm_protect(mach_task_self(), (vm_address_t)addr, byteCount, false,
+                       VM_PROT_READ | VM_PROT_EXECUTE) == KERN_SUCCESS;
 }
 
 // ==================================================
-// KHỞI TẠO — TRÌ HOÃN AN TOÀN
+// HACK THREAD — OFFSET BẠN CUNG CẤP
 // ==================================================
-static bool __attribute__((constructor)) mod_init() {
-    LOGI(@"✅ Dylib đã nạp — chờ game khởi động...");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
-        do {
-            il2cppBase = get_lib_base(targetLibName);
-            if (il2cppBase == 0) il2cppBase = get_lib_base("UnityFramework");
-            if (il2cppBase == 0) usleep(500000);
-        } while (il2cppBase == 0);
+void *hack_thread(void *) {
+    LOGI(@"🔍 Đang tìm UnityFramework...");
 
-        LOGI(@"✅ Lib tìm thấy tại: %p", (void*)il2cppBase);
-        ApplyAntiBanPatches();
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (UF(0x51C4048)) DobbyHook((void*)UF(0x51C4048), (void*)cam,     (void**)&_cam);
-            if (UF(0x51C2C04)) DobbyHook((void*)UF(0x51C2C04), (void*)Update,   (void**)&_Update);
-            if (UF(0x51C46A0)) DobbyHook((void*)UF(0x51C46A0), (void*)highrate, (void**)&_highrate);
-            LOGI(@"✅ Hook hoàn tất");
-        });
-    });
-    return true;
+    do {
+        il2cppBase = get_lib_base(targetLibName);
+        usleep(500000);
+    } while (il2cppBase == 0);
+
+    LOGI(@"✅ Tìm thấy tại: %p", (void*)il2cppBase);
+
+    // ========== ANTIBAN ==========
+    PatchBytes(il2cppBase + 0x844D79C, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x70783C4, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x70785C4, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x9004E34, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x9004384, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x90047B8, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x900497C, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x9004B34, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x844E26C, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x844E0A0, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x844DBC4, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x844D82C, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x726CFE8, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x726CEAC, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x726DB54, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x9005C4C, "00 00 80 D2 C0 03 5F D6");
+    PatchBytes(il2cppBase + 0x900503C, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x9004C2C, "00 00 80 D2 C0 03 5F D6 1F 20 03 D5 1F 20 03 D5");
+    PatchBytes(il2cppBase + 0x90050B0, "00 00 80 D2 C0 03 5F D6");
+
+    // ========== HACKMAP ==========
+    hexPatches.Hackmap     = il2cppBase + 0x4826BB8;
+    hexPatches.Hackmap_hex = "36 00 80 D2";
+
+    // ========== CAM 3 NẤC ==========
+    hexPatches.Cam1        = il2cppBase + 0x525BE48;
+    hexPatches.Cam1_hex    = "20 00 80 D2 C0 03 5F D6";
+    hexPatches.Cam2        = il2cppBase + 0x76CB578;
+    hexPatches.Cam2_hex    = "00 00 A8 52 00 00 27 1E C0 03 5F D6";
+    hexPatches.Cam3        = il2cppBase + 0x77A4410;
+    hexPatches.Cam3_hex    = "00 00 A8 52 00 00 27 1E C0 03 5F D6";
+
+    // ========== CAM KÉO ✅ MỚI THÊM ==========
+    hexPatches.CamKéo1     = il2cppBase + 0x78198BC;
+    hexPatches.CamKéo1_hex = "20 00 80 D2 C0 03 5F D6";
+    hexPatches.CamKéo2     = il2cppBase + 0x76CB578;
+    hexPatches.CamKéo2_hex = "00 00 A8 52 00 00 27 1E C0 03 5F D6";
+    hexPatches.CamKéo3     = il2cppBase + 0x77A4410;
+    hexPatches.CamKéo3_hex = "00 00 A8 52 00 00 27 1E C0 03 5F D6";
+
+    // ========== SHOW ULT ==========
+    hexPatches.Unti1       = il2cppBase + 0x5BA7218;
+    hexPatches.Unti1_hex   = "20 00 80 D2 C0 03 5F D6";
+    hexPatches.Unti2       = il2cppBase + 0x6660B80;
+    hexPatches.Unti2_hex   = "20 00 80 D2 C0 03 5F D6";
+    hexPatches.Unti3       = il2cppBase + 0x6660A1C;
+    hexPatches.Unti3_hex   = "20 00 80 D2 C0 03 5F D6";
+
+    // ========== SHOW LSĐ ==========
+    hexPatches.Lds         = il2cppBase + 0x57931E4;
+    hexPatches.Lds_hex     = "20 00 80 D2 C0 03 5F D6";
+
+    // ========== KHÓA TIA ELSU ==========
+    hexPatches.An          = il2cppBase + 0x5C5B628;
+    hexPatches.An_hex      = "20 00 80 D2 C0 03 5F D6";
+
+    // Trạng thái ban đầu
+    hexPatches.Hackmap_active = false;
+    hexPatches.Cam3Nac_active = false;
+    hexPatches.CamKéo_active  = false;
+    hexPatches.Unti_active    = false;
+    hexPatches.Lds_active     = false;
+    hexPatches.An_active      = false;
+
+    LOGI(@"✅ Tất cả offset đã nạp!");
+    return NULL;
 }
 
 // ==================================================
-// MENU & GIAO DIỆN
+// KHỞI TẠO
+// ==================================================
+__attribute__((constructor))
+void lib_main() {
+    LOGI(@"✅ Dylib đã nạp — chờ game...");
+    pthread_t ptid;
+    pthread_create(&ptid, NULL, hack_thread, NULL);
+    pthread_detach(ptid);
+}
+
+// ==================================================
+// MENU ImGui
 // ==================================================
 @interface ImGuiDrawView : UIView <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
@@ -257,10 +297,6 @@ static bool __attribute__((constructor)) mod_init() {
     [super touchesEnded:touches withEvent:event];
 }
 
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self touchesEnded:touches withEvent:event];
-}
-
 - (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
@@ -278,65 +314,86 @@ static bool __attribute__((constructor)) mod_init() {
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
-    if (MenDeal) {
+    if (MenDeal && il2cppBase) {
         ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSizeConstraints(ImVec2(280, 200), ImVec2(kWidth*0.95f, kHeight*0.9f));
-        
-        if (ImGui::Begin("Menu AOV", &MenDeal)) {
-            if (ImGui::BeginTabBar("TabBar")) {
-                
-                if (ImGui::BeginTabItem("Cam Kéo")) {
-                    ImGui::Checkbox("Kéo Camera", &camHookActive);
-                    ImGui::Checkbox("Feature Toggle", &featureHookToggle);
-                    ImGui::SliderFloat("FOV", &SetFieldOfView, 0.1f, 15.0f);
-                    ImGui::EndTabItem();
-                }
-                
-                if (ImGui::BeginTabItem("Cam Xa")) {
-                    if (ImGui::Checkbox("Cam Xa 3 Nấc", &camXaActive)) {
-                        if (camXaActive) {
-                            ApplyPatch(0x525BE48, "0x20008052C0035FD6");
-                            s_camXaApplied = true;
-                        } else if (s_camXaApplied) {
-                            RestorePatch(0x525BE48, "0x20008052C0035FD6");
-                            s_camXaApplied = false;
-                        }
-                    }
-                    ImGui::EndTabItem();
-                }
-                
-                if (ImGui::BeginTabItem("Show Ult")) {
-                    if (ImGui::Checkbox("Hiện Kỹ Năng", &showUltActive)) {
-                        if (showUltActive) {
-                            ApplyPatch(0x5BA7218, "0x20008052C0035FD6");
-                            ApplyPatch(0x6660B80, "0x20008052C0035FD6");
-                            ApplyPatch(0x6660A1C, "0x20008052C0035FD6");
-                            s_ultApplied = true;
-                        } else if (s_ultApplied) {
-                            RestorePatch(0x5BA7218, "0x20008052C0035FD6");
-                            RestorePatch(0x6660B80, "0x20008052C0035FD6");
-                            RestorePatch(0x6660A1C, "0x20008052C0035FD6");
-                            s_ultApplied = false;
-                        }
-                    }
-                    ImGui::EndTabItem();
-                }
-                
-                if (ImGui::BeginTabItem("Map")) {
-                    if (ImGui::Checkbox("Map Toàn Cục", &mapActive)) {
-                        if (mapActive) {
-                            ApplyPatch(0x4826BB8, "0x360080D2");
-                            s_mapApplied = true;
-                        } else if (s_mapApplied) {
-                            RestorePatch(0x4826BB8, "0x360080D2");
-                            s_mapApplied = false;
-                        }
-                    }
-                    ImGui::EndTabItem();
-                }
-                
-                ImGui::EndTabBar();
+        if (ImGui::Begin("Eri Lỏ *_*", &MenDeal)) {
+            
+            ImGui::TextColored(ImVec4(0,1,0,1), "✅ AntiCheat + Xoá Tố Cáo: Đã bật");
+            ImGui::Separator();
+            
+            // Hackmap
+            bool bHack = hexPatches.Hackmap_active;
+            if (ImGui::Checkbox("Hackmap", &bHack)) {
+                hexPatches.Hackmap_active = bHack;
+                PatchBytes(hexPatches.Hackmap, bHack ? hexPatches.Hackmap_hex : "36 00 80 D2");
             }
+            
+            // Cam 3 Nấc
+            bool bCam3 = hexPatches.Cam3Nac_active;
+            if (ImGui::Checkbox("Cam 3 Nấc", &bCam3)) {
+                hexPatches.Cam3Nac_active = bCam3;
+                if (bCam3) {
+                    PatchBytes(hexPatches.Cam1, hexPatches.Cam1_hex);
+                    PatchBytes(hexPatches.Cam2, hexPatches.Cam2_hex);
+                    PatchBytes(hexPatches.Cam3, hexPatches.Cam3_hex);
+                } else {
+                    PatchBytes(hexPatches.Cam1, "20 00 80 D2 C0 03 5F D6");
+                    PatchBytes(hexPatches.Cam2, "00 00 A8 52 00 00 27 1E C0 03 5F D6");
+                    PatchBytes(hexPatches.Cam3, "00 00 A8 52 00 00 27 1E C0 03 5F D6");
+                }
+            }
+            
+            // Cam Kéo ✅ MỚI
+            bool bCamK = hexPatches.CamKéo_active;
+            if (ImGui::Checkbox("Cam Kéo", &bCamK)) {
+                hexPatches.CamKéo_active = bCamK;
+                if (bCamK) {
+                    PatchBytes(hexPatches.CamKéo1, hexPatches.CamKéo1_hex);
+                    PatchBytes(hexPatches.CamKéo2, hexPatches.CamKéo2_hex);
+                    PatchBytes(hexPatches.CamKéo3, hexPatches.CamKéo3_hex);
+                } else {
+                    PatchBytes(hexPatches.CamKéo1, "20 00 80 D2 C0 03 5F D6");
+                    PatchBytes(hexPatches.CamKéo2, "00 00 A8 52 00 00 27 1E C0 03 5F D6");
+                    PatchBytes(hexPatches.CamKéo3, "00 00 A8 52 00 00 27 1E C0 03 5F D6");
+                }
+            }
+            
+            // Show Kỹ Năng
+            bool bUnti = hexPatches.Unti_active;
+            if (ImGui::Checkbox("Show Kỹ Năng", &bUnti)) {
+                hexPatches.Unti_active = bUnti;
+                if (bUnti) {
+                    PatchBytes(hexPatches.Unti1, hexPatches.Unti1_hex);
+                    PatchBytes(hexPatches.Unti2, hexPatches.Unti2_hex);
+                    PatchBytes(hexPatches.Unti3, hexPatches.Unti3_hex);
+                } else {
+                    PatchBytes(hexPatches.Unti1, "20 00 80 D2 C0 03 5F D6");
+                    PatchBytes(hexPatches.Unti2, "20 00 80 D2 C0 03 5F D6");
+                    PatchBytes(hexPatches.Unti3, "20 00 80 D2 C0 03 5F D6");
+                }
+            }
+            
+            // Show LSĐ
+            bool bLds = hexPatches.Lds_active;
+            if (ImGui::Checkbox("Show LSĐ", &bLds)) {
+                hexPatches.Lds_active = bLds;
+                PatchBytes(hexPatches.Lds, bLds ? hexPatches.Lds_hex : "20 00 80 D2 C0 03 5F D6");
+            }
+            
+            // Khóa Tia Elsu
+            bool bAn = hexPatches.An_active;
+            if (ImGui::Checkbox("Khóa Tia Elsu", &bAn)) {
+                hexPatches.An_active = bAn;
+                PatchBytes(hexPatches.An, bAn ? hexPatches.An_hex : "20 00 80 D2 C0 03 5F D6");
+            }
+            
+            ImGui::End();
+        }
+    } else if (!il2cppBase) {
+        ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Đang chờ...", NULL)) {
+            ImGui::TextColored(ImVec4(1,1,0,1), "Đang tìm UnityFramework...");
+            ImGui::Text("Chờ vài giây rồi chạm 3 ngón tay mở menu");
             ImGui::End();
         }
     }
