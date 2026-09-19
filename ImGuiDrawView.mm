@@ -9,6 +9,7 @@
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
+#import "5Toubun/dobby.h"
 #import "IMGUI/imgui.h"
 #import "IMGUI/imgui_impl_metal.h"
 #import "IMGUI/zzz.h"
@@ -32,9 +33,49 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 }
 #endif
 
-// ========== BIẾN TOÀN CỤC ==========
+// ========== BIẾN TOÀN CỤC — CAM KÉO ==========
+struct WideView_t {
+    float GetFieldOfView;
+    float SetFieldOfView;
+    bool Active;
+} WideView = {0, 0, false};
+
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
+
+// ========== HOOK POINTERS ==========
+typedef float (*fn_GetCam)(void *instance, int type);
+static fn_GetCam old_GetCameraHeightRateValue = nullptr;
+
+typedef void (*fn_OnHeightChanged)(void *instance);
+static fn_OnHeightChanged OnCameraHeightChanged = nullptr;
+
+typedef void (*fn_CamUpdate)(void *instance);
+static fn_CamUpdate old_CameraSystemUpdate = nullptr;
+
+// ========== CAM KÉO — LOGIC CHÍNH ==========
+float GetCameraHeightRateValue(void *instance, int type) {
+    if (instance != NULL) {
+        WideView.GetFieldOfView = old_GetCameraHeightRateValue(instance, type);
+        if (WideView.SetFieldOfView != 0) {
+            WideView.Active = false;
+            return WideView.SetFieldOfView + WideView.GetFieldOfView;
+        }
+        return WideView.GetFieldOfView;
+    }
+    if (old_GetCameraHeightRateValue)
+        return old_GetCameraHeightRateValue(instance, type);
+    return 6.0f;
+}
+
+void CameraSystemUpdate(void *instance) {
+    if (instance != NULL && WideView.Active) {
+        if (OnCameraHeightChanged)
+            OnCameraHeightChanged(instance);
+    }
+    if (old_CameraSystemUpdate)
+        old_CameraSystemUpdate(instance);
+}
 
 // ========== PATCH STRUCT ==========
 struct FuncPatch {
@@ -44,7 +85,6 @@ struct FuncPatch {
     bool active;
 };
 
-// AntiBan — chỉ bật khi chọn trong menu
 static const struct {
     uintptr_t rva;
     const char* hex;
@@ -58,12 +98,11 @@ static const struct {
 };
 static const int antiBanCount = sizeof(antiBanPatches)/sizeof(antiBanPatches[0]);
 
-// Các chức năng
-static struct FuncPatch cam3nat   = {0x525BE48, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch showU1    = {0x5BA7218, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch showU2    = {0x6660B80, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch showU3    = {0x6660A1C, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch mapPch    = {0x4826BB8, "36 00 80 D2", "36 00 80 D2", false};
+static struct FuncPatch cam3nat  = {0x525BE48, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch showU1   = {0x5BA7218, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch showU2   = {0x6660B80, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch showU3   = {0x6660A1C, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch mapPch   = {0x4826BB8, "36 00 80 D2", "36 00 80 D2", false};
 
 // ========== UTIL ==========
 uintptr_t get_lib_base(const char* libName) {
@@ -117,21 +156,25 @@ static bool TogglePatch(struct FuncPatch* p, bool on) {
     return PatchHex(il2cppBase + p->rva, on ? p->hexOn : p->hexOff);
 }
 
-// ========== HACK THREAD ==========
+// ========== HACK THREAD — HOOK CAM KÉO ==========
 static void* hack_thread(void*) {
     do {
         il2cppBase = get_lib_base("UnityFramework");
         usleep(500000);
     } while (!il2cppBase);
     
-    LOGI(@"✅ UnityFramework tìm thấy: %p", (void*)il2cppBase);
-    LOGI(@"ℹ️ Chờ mở menu bằng 3 ngón tay — không tự patch gì");
-    
-    // Tất cả trạng thái tắt ban đầu — KHÔNG TỰ PATCH
-    cam3nat.active = false;
-    showU1.active = showU2.active = showU3.active = false;
-    mapPch.active = false;
-    
+    LOGI(@"✅ UnityFramework: %p", (void*)il2cppBase);
+
+    // Lấy địa chỉ hàm OnCameraHeightChanged
+    OnCameraHeightChanged = (fn_OnHeightChanged)(il2cppBase + 0x107A3BC);
+    LOGI(@"✅ OnHeightChanged: %p", (void*)OnCameraHeightChanged);
+
+    // Hook Cam Kéo
+    void* pCamFunc  = (void*)(il2cppBase + 0x107A2FC);
+    DobbyHook(pCamFunc, (void*)GetCameraHeightRateValue, (void**)&old_GetCameraHeightRateValue);
+    DobbyHook(pCamFunc, (void*)CameraSystemUpdate,    (void**)&old_CameraSystemUpdate);
+    LOGI(@"✅ Cam Kéo Hook OK");
+
     return nullptr;
 }
 
@@ -165,17 +208,13 @@ void lib_main() {
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
-    if ((self = [super initWithFrame:frame])) {
-        [self commonInit];
-    }
+    if ((self = [super initWithFrame:frame])) [self commonInit];
     return self;
 }
 
 - (void)commonInit {
     self.backgroundColor = [UIColor clearColor];
     self.opaque = NO;
-    self.userInteractionEnabled = YES;
-    
     _device = MTLCreateSystemDefaultDevice();
     _cmdQueue = [_device newCommandQueue];
     
@@ -188,11 +227,9 @@ void lib_main() {
     _mtkView = [[MTKView alloc] initWithFrame:self.bounds];
     _mtkView.device = _device;
     _mtkView.delegate = self;
-    _mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
+    _mtkView.clearColor = MTLClearColorMake(0,0,0,0);
     _mtkView.opaque = NO;
-    _mtkView.userInteractionEnabled = NO;
     _mtkView.framebufferOnly = NO;
-    _mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self addSubview:_mtkView];
 }
 
@@ -209,8 +246,8 @@ void lib_main() {
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    CGPoint p = [[touches anyObject] locationInView:self];
     if (MenDeal && _touchDown) {
+        CGPoint p = [[touches anyObject] locationInView:self];
         ImGui::GetIO().MousePos = ImVec2(p.x, p.y);
         return;
     }
@@ -243,7 +280,7 @@ void lib_main() {
 
     if (MenDeal && il2cppBase) {
         if (ImGui::Begin("Eri Lỏ *_*", &MenDeal)) {
-            ImGui::TextColored(ImVec4(0, 1, 0, 1), "✅ Kết nối OK — chỉ bật khi chọn");
+            ImGui::TextColored(ImVec4(0,1,0,1), "✅ Cam Kéo Hooked");
             ImGui::Separator();
 
             // AntiBan
@@ -255,6 +292,15 @@ void lib_main() {
                     }
                 }
             }
+
+            // ========== CAM KÉO ==========
+            ImGui::Checkbox("Kéo Camera", &WideView.Active);
+            float val = WideView.SetFieldOfView / 0.0362f;
+            if (ImGui::SliderFloat(OBFUSCATE("2_SeekBar_Cam xa_1_100"), &val, 1.0f, 100.0f)) {
+                WideView.SetFieldOfView = val * 0.0362f;
+                WideView.Active = true;
+            }
+            ImGui::Text("Giá trị FOV: %.2f", WideView.SetFieldOfView);
 
             // Cam 3 Nấc
             static bool cam3On = false;
@@ -280,8 +326,8 @@ void lib_main() {
         }
     } else if (!il2cppBase) {
         if (ImGui::Begin("Đang chờ...", NULL)) {
-            ImGui::TextColored(ImVec4(1, 1, 0, 1), "Đang nạp UnityFramework...");
-            ImGui::Text("Mở game rồi chạm 3 ngón tay mở menu");
+            ImGui::TextColored(ImVec4(1,1,0,1), "Đang nạp UnityFramework...");
+            ImGui::Text("Chạm 3 ngón tay mở menu");
             ImGui::End();
         }
     }
