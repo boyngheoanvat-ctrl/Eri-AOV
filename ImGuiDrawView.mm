@@ -33,7 +33,7 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 }
 #endif
 
-// ========== CẤU TRÚC WIDEVIEW ==========
+// ========== BIẾN TOÀN CỤC ==========
 struct WideView_t {
     float GetFieldOfView;
     float SetFieldOfView;
@@ -42,6 +42,7 @@ struct WideView_t {
 
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
+static bool hooksInstalled = false; // Đánh dấu đã hook chưa
 
 // ========== HOOK DECLARE ==========
 typedef float (*fn_GetCam)(void *instance, int type);
@@ -51,9 +52,9 @@ typedef void (*fn_Update)(void *instance);
 static fn_Update old_CameraSystemUpdate = nullptr;
 static fn_Update OnCameraHeightChanged = nullptr;
 
-// ========== LOGIC CHÍNH ==========
+// ========== LOGIC CAM KÉO ==========
 float GetCameraHeightRateValue(void *instance, int type) {
-    if (instance != NULL) {
+    if (instance != NULL && old_GetCameraHeightRateValue) {
         WideView.GetFieldOfView = old_GetCameraHeightRateValue(instance, type);
         if (WideView.SetFieldOfView != 0.0f) {
             WideView.Active = false;
@@ -61,18 +62,16 @@ float GetCameraHeightRateValue(void *instance, int type) {
         }
         return WideView.GetFieldOfView;
     }
-    if (old_GetCameraHeightRateValue)
-        return old_GetCameraHeightRateValue(instance, type);
-    return 6.0f;
+    return old_GetCameraHeightRateValue ? old_GetCameraHeightRateValue(instance, type) : 6.0f;
 }
 
 void CameraSystemUpdate(void *instance) {
-    if (instance != NULL && WideView.Active) {
-        if (OnCameraHeightChanged)
-            OnCameraHeightChanged(instance);
+    if (instance != NULL && WideView.Active && OnCameraHeightChanged) {
+        OnCameraHeightChanged(instance);
     }
-    if (old_CameraSystemUpdate)
+    if (old_CameraSystemUpdate) {
         old_CameraSystemUpdate(instance);
+    }
 }
 
 // ========== PATCH STRUCT ==========
@@ -140,12 +139,18 @@ static bool PatchHex(uintptr_t addr, const char* hexStr) {
     if (!ParseHex(hexStr, bytes, sizeof(bytes), &len)) return false;
     
     kern_return_t kr = vm_protect(mach_task_self(), addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
-    if (kr != KERN_SUCCESS) return false;
+    if (kr != KERN_SUCCESS) {
+        LOGI(@"⚠️ vm_protect thất bại tại 0x%llX — bỏ qua patch", (uint64_t)addr);
+        return false;
+    }
     
     memcpy((void*)addr, bytes, len);
     
     kr = vm_protect(mach_task_self(), addr, len, false, VM_PROT_READ | VM_PROT_EXECUTE);
-    return kr == KERN_SUCCESS;
+    if (kr != KERN_SUCCESS) {
+        LOGI(@"⚠️ Khôi phục bảo vệ thất bại tại 0x%llX", (uint64_t)addr);
+    }
+    return true;
 }
 
 static bool TogglePatch(struct FuncPatch* p, bool on) {
@@ -154,33 +159,52 @@ static bool TogglePatch(struct FuncPatch* p, bool on) {
     return PatchHex(il2cppBase + p->rva, on ? p->hexOn : p->hexOff);
 }
 
-// ========== HACK THREAD — HOOK CAM KÉO ==========
+// ========== CÀI HOOK — CHỈ GỌI KHI GAME ỔN ĐỊNH ==========
+static void InstallHooksWhenReady() {
+    if (hooksInstalled || !il2cppBase) return;
+    
+    LOGI(@"⏳ Đang đợi game ổn định...");
+    // Đợi thêm 2 giây để game khởi tạo xong hoàn toàn
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        OnCameraHeightChanged = (fn_Update)(il2cppBase + 0x51C46A0);
+        LOGI(@"✅ OnCameraHeightChanged: %p", (void*)OnCameraHeightChanged);
+
+        void* pUpdate = (void*)(il2cppBase + 0x51C2C04);
+        void* pGetCam = (void*)(il2cppBase + 0x51C4048);
+
+        DobbyHook(pUpdate, (void*)CameraSystemUpdate, (void**)&old_CameraSystemUpdate);
+        DobbyHook(pGetCam, (void*)GetCameraHeightRateValue, (void**)&old_GetCameraHeightRateValue);
+        
+        hooksInstalled = true;
+        LOGI(@"✅ TẤT CẢ HOOK ĐÃ SẴN SÀNG — Cam Kéo OK");
+    });
+}
+
+// ========== HACK THREAD ==========
 static void* hack_thread(void*) {
+    // Đợi UnityFramework nạp
+    int retry = 0;
     do {
         il2cppBase = get_lib_base("UnityFramework");
-        usleep(500000);
-    } while (!il2cppBase);
+        if (!il2cppBase) usleep(500000);
+        retry++;
+    } while (!il2cppBase && retry < 20); // Tối đa 10s chờ
     
-    LOGI(@"✅ UnityFramework: %p", (void*)il2cppBase);
-
-    // Lấy địa chỉ hàm
-    OnCameraHeightChanged = (fn_Update)(il2cppBase + 0x51C46A0);
-    LOGI(@"✅ OnCameraHeightChanged: %p", (void*)OnCameraHeightChanged);
-
-    // Hook 2 hàm — 2 địa chỉ RIÊNG
-    void* pUpdate = (void*)(il2cppBase + 0x51C2C04);
-    void* pGetCam = (void*)(il2cppBase + 0x51C4048);
-
-    DobbyHook(pUpdate, (void*)CameraSystemUpdate, (void**)&old_CameraSystemUpdate);
-    DobbyHook(pGetCam, (void*)GetCameraHeightRateValue, (void**)&old_GetCameraHeightRateValue);
+    if (!il2cppBase) {
+        LOGI(@"❌ Không tìm thấy UnityFramework — thoát");
+        return nullptr;
+    }
     
-    LOGI(@"✅ Cam Kéo Hook OK — 0x51C2C04 & 0x51C4048");
+    LOGI(@"✅ UnityFramework: %p — đợi game ổn định...", (void*)il2cppBase);
+    
+    // Gọi cài hook — sẽ đợi thêm rồi mới chạy
+    InstallHooksWhenReady();
     return nullptr;
 }
 
 __attribute__((constructor))
 void lib_main() {
-    LOGI(@"✅ Dylib đã nạp — chờ game...");
+    LOGI(@"✅ Dylib nạp — chờ game...");
     pthread_t th;
     pthread_create(&th, nullptr, hack_thread, nullptr);
     pthread_detach(th);
@@ -280,7 +304,11 @@ void lib_main() {
 
     if (MenDeal && il2cppBase) {
         if (ImGui::Begin("Eri Lỏ *_*", &MenDeal)) {
-            ImGui::TextColored(ImVec4(0,1,0,1), "✅ Cam Kéo Hooked");
+            if (!hooksInstalled) {
+                ImGui::TextColored(ImVec4(1,1,0,1), "⏳ Đang đợi hook...");
+            } else {
+                ImGui::TextColored(ImVec4(0,1,0,1), "✅ Tất cả sẵn sàng");
+            }
             ImGui::Separator();
 
             // AntiBan
@@ -293,14 +321,16 @@ void lib_main() {
                 }
             }
 
-            // ========== CAM KÉO ==========
-            ImGui::Checkbox("Kéo Camera", &WideView.Active);
-            float val = WideView.SetFieldOfView / 0.0362f;
-            if (ImGui::SliderFloat(OBFUSCATE("2_SeekBar_Cam xa_1_100"), &val, 1.0f, 100.0f)) {
-                WideView.SetFieldOfView = val * 0.0362f;
-                WideView.Active = true;
+            // Cam Kéo — chỉ hiển thị khi hook xong
+            if (hooksInstalled) {
+                ImGui::Checkbox("Kéo Camera", &WideView.Active);
+                float val = WideView.SetFieldOfView / 0.0362f;
+                if (ImGui::SliderFloat(OBFUSCATE("2_SeekBar_Cam xa_1_100"), &val, 1.0f, 100.0f)) {
+                    WideView.SetFieldOfView = val * 0.0362f;
+                    WideView.Active = true;
+                }
+                ImGui::Text("FOV: %.2f", WideView.SetFieldOfView);
             }
-            ImGui::Text("FOV: %.2f | Hệ số: ×%.4f", WideView.SetFieldOfView, WideView.SetFieldOfView / 0.0362f);
 
             // Cam 3 Nấc
             static bool cam3On = false;
@@ -326,7 +356,7 @@ void lib_main() {
         }
     } else if (!il2cppBase) {
         if (ImGui::Begin("Đang chờ...", NULL)) {
-            ImGui::TextColored(ImVec4(1,1,0,1), "Đang nạp UnityFramework...");
+            ImGui::TextColored(ImVec4(1,1,0,1), "Đang nạp game...");
             ImGui::Text("Chạm 3 ngón tay mở menu");
             ImGui::End();
         }
