@@ -9,7 +9,6 @@
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
-#import "5Toubun/dobby.h"
 #import "IMGUI/imgui.h"
 #import "IMGUI/imgui_impl_metal.h"
 #import "IMGUI/zzz.h"
@@ -33,34 +32,9 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 }
 #endif
 
-// ========== BIẾN ==========
+// ========== BIẾN TOÀN CỤC ==========
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
-float SetFieldOfView = 6.0f;
-bool lockcam = false;
-
-// ========== CAM HOOK ==========
-typedef float (*fn_cam)(void* _this, int type);
-static fn_cam orig_cam = nullptr;
-
-float hook_cam(void* _this, int type) {
-    if (lockcam) return SetFieldOfView;
-    return orig_cam ? orig_cam(_this, type) : 6.0f;
-}
-
-typedef void (*fn_Update)(void* _this);
-static fn_Update orig_Update = nullptr;
-
-void hook_Update(void* _this) {
-    if (orig_Update && !lockcam) orig_Update(_this);
-}
-
-typedef void (*fn_HighRate)(void* _this);
-static fn_HighRate orig_HighRate = nullptr;
-
-void hook_HighRate(void* _this) {
-    if (orig_HighRate) orig_HighRate(_this);
-}
 
 // ========== PATCH STRUCT ==========
 struct FuncPatch {
@@ -70,11 +44,26 @@ struct FuncPatch {
     bool active;
 };
 
-static struct FuncPatch cam3nat  = {0x525BE48, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch showU1   = {0x5BA7218, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch showU2   = {0x6660B80, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch showU3   = {0x6660A1C, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
-static struct FuncPatch mapPch   = {0x4826BB8, "36 00 80 D2",          "36 00 80 D2",               false};
+// AntiBan — chỉ bật khi chọn trong menu
+static const struct {
+    uintptr_t rva;
+    const char* hex;
+} antiBanPatches[] = {
+    {0x5F88E3C, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5"},
+    {0x4C3E394, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5"},
+    {0x6C46CFC, "00 00 80 D2 C0 03 5F D6"},
+    {0x6C46220, "C0 03 5F D6 1F 20 03 D5 1F 20 03 D5"},
+    {0x6C45E70, "00 00 80 D2 C0 03 5F D6 1F 20 03 D5 1F 20 03 D5"},
+    {0x6C462B8, "00 00 80 D2 C0 03 5F D6"},
+};
+static const int antiBanCount = sizeof(antiBanPatches)/sizeof(antiBanPatches[0]);
+
+// Các chức năng
+static struct FuncPatch cam3nat   = {0x525BE48, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch showU1    = {0x5BA7218, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch showU2    = {0x6660B80, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch showU3    = {0x6660A1C, "20 00 80 D2 C0 03 5F D6", "20 00 80 52 C0 03 5F D6", false};
+static struct FuncPatch mapPch    = {0x4826BB8, "36 00 80 D2", "36 00 80 D2", false};
 
 // ========== UTIL ==========
 uintptr_t get_lib_base(const char* libName) {
@@ -96,10 +85,11 @@ static bool ParseHex(const char* str, uint8_t* out, size_t maxLen, size_t* outLe
     char buf[3] = {0};
     for (size_t i = 0; i < len && cnt < maxLen; i++) {
         if (str[i] == ' ') continue;
-        if (i+1 >= len) break;
+        if (i + 1 >= len) break;
         buf[0] = str[i]; buf[1] = str[i+1];
         unsigned int v;
-        if (sscanf(buf, "%02x", &v) == 1) out[cnt++] = (uint8_t)v;
+        if (sscanf(buf, "%02x", &v) == 1)
+            out[cnt++] = (uint8_t)v;
         i++;
     }
     *outLen = cnt;
@@ -107,8 +97,9 @@ static bool ParseHex(const char* str, uint8_t* out, size_t maxLen, size_t* outLe
 }
 
 static bool PatchHex(uintptr_t addr, const char* hexStr) {
-    if (!addr) return false;
-    uint8_t bytes[32]; size_t len;
+    if (!addr || !hexStr) return false;
+    uint8_t bytes[32];
+    size_t len;
     if (!ParseHex(hexStr, bytes, sizeof(bytes), &len)) return false;
     
     kern_return_t kr = vm_protect(mach_task_self(), addr, len, false, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
@@ -132,27 +123,21 @@ static void* hack_thread(void*) {
         il2cppBase = get_lib_base("UnityFramework");
         usleep(500000);
     } while (!il2cppBase);
-
-    LOGI(@"✅ UnityFramework nạp tại: %p", (void*)il2cppBase);
-
-    // Hook Cam Kéo — dùng Dobby, không ghi trực tiếp
-    dispatch_async(dispatch_get_main_queue(), ^{
-        void* pCam = (void*)(il2cppBase + 0x51C4048);
-        void* pUpd = (void*)(il2cppBase + 0x51C2C04);
-        void* pHig = (void*)(il2cppBase + 0x51C46A0);
-        
-        if (pCam) DobbyHook(pCam, (void*)hook_cam, (void**)&orig_cam);
-        if (pUpd) DobbyHook(pUpd, (void*)hook_Update, (void**)&orig_Update);
-        if (pHig) DobbyHook(pHig, (void*)hook_HighRate, (void**)&orig_HighRate);
-        
-        LOGI(@"✅ Cam Kéo Hook OK");
-    });
-
+    
+    LOGI(@"✅ UnityFramework tìm thấy: %p", (void*)il2cppBase);
+    LOGI(@"ℹ️ Chờ mở menu bằng 3 ngón tay — không tự patch gì");
+    
+    // Tất cả trạng thái tắt ban đầu — KHÔNG TỰ PATCH
+    cam3nat.active = false;
+    showU1.active = showU2.active = showU3.active = false;
+    mapPch.active = false;
+    
     return nullptr;
 }
 
 __attribute__((constructor))
 void lib_main() {
+    LOGI(@"✅ Dylib đã nạp — chờ game...");
     pthread_t th;
     pthread_create(&th, nullptr, hack_thread, nullptr);
     pthread_detach(th);
@@ -172,21 +157,24 @@ void lib_main() {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         dispatch_async(dispatch_get_main_queue(), ^{
-            ImGuiDrawView* o = [[ImGuiDrawView alloc] initWithFrame:[UIScreen mainScreen].bounds];
-            o.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-            [[[UIApplication sharedApplication] keyWindow] addSubview:o];
+            ImGuiDrawView* overlay = [[ImGuiDrawView alloc] initWithFrame:[UIScreen mainScreen].bounds];
+            overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            [[[UIApplication sharedApplication] keyWindow] addSubview:overlay];
         });
     });
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
-    if ((self = [super initWithFrame:frame])) [self commonInit];
+    if ((self = [super initWithFrame:frame])) {
+        [self commonInit];
+    }
     return self;
 }
 
 - (void)commonInit {
     self.backgroundColor = [UIColor clearColor];
     self.opaque = NO;
+    self.userInteractionEnabled = YES;
     
     _device = MTLCreateSystemDefaultDevice();
     _cmdQueue = [_device newCommandQueue];
@@ -202,31 +190,34 @@ void lib_main() {
     _mtkView.delegate = self;
     _mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
     _mtkView.opaque = NO;
+    _mtkView.userInteractionEnabled = NO;
     _mtkView.framebufferOnly = NO;
+    _mtkView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self addSubview:_mtkView];
 }
 
-- (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint p = [[touches anyObject] locationInView:self];
     if (touches.count >= 3) { MenDeal = !MenDeal; return; }
     if (MenDeal) {
-        ImGui::GetIO().MousePos = ImVec2(p.x, p.y);
-        ImGui::GetIO().MouseDown[0] = _touchDown = YES;
+        ImGuiIO& io = ImGui::GetIO();
+        io.MousePos = ImVec2(p.x, p.y);
+        io.MouseDown[0] = _touchDown = YES;
         return;
     }
     [super touchesBegan:touches withEvent:event];
 }
 
-- (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    CGPoint p = [[touches anyObject] locationInView:self];
     if (MenDeal && _touchDown) {
-        CGPoint p = [[touches anyObject] locationInView:self];
         ImGui::GetIO().MousePos = ImVec2(p.x, p.y);
         return;
     }
     [super touchesMoved:touches withEvent:event];
 }
 
-- (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (MenDeal) {
         ImGui::GetIO().MouseDown[0] = _touchDown = NO;
         return;
@@ -234,7 +225,7 @@ void lib_main() {
     [super touchesEnded:touches withEvent:event];
 }
 
-- (void)drawInMTKView:(MTKView*)view {
+- (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
     io.DisplayFramebufferScale = ImVec2(kScale, kScale);
@@ -242,32 +233,38 @@ void lib_main() {
 
     MTLRenderPassDescriptor* pass = view.currentRenderPassDescriptor;
     if (!pass) return;
+    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 
-    id<MTLCommandBuffer> cmdBuf = [_cmdQueue commandBuffer];
-    id<MTLRenderCommandEncoder> enc = [cmdBuf renderCommandEncoderWithDescriptor:pass];
-    
+    id<MTLCommandBuffer> cmd = [_cmdQueue commandBuffer];
+    id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:pass];
+
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
     if (MenDeal && il2cppBase) {
-        ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Eri Lỏ *_*", &MenDeal)) {
-            
-            ImGui::TextColored(ImVec4(0, 1, 0, 1), "✅ Đã nạp — Không có AntiBan");
+            ImGui::TextColored(ImVec4(0, 1, 0, 1), "✅ Kết nối OK — chỉ bật khi chọn");
             ImGui::Separator();
 
-            // Cam Kéo
-            ImGui::Checkbox("🔧 Cam Kéo (Lock FOV)", &lockcam);
-            ImGui::SliderFloat("FOV Value", &SetFieldOfView, 0.1f, 15.0f);
+            // AntiBan
+            static bool antiBanOn = false;
+            if (ImGui::Checkbox("AntiBan + Xoá Tố Cáo", &antiBanOn)) {
+                if (antiBanOn) {
+                    for (int i = 0; i < antiBanCount; i++) {
+                        PatchHex(il2cppBase + antiBanPatches[i].rva, antiBanPatches[i].hex);
+                    }
+                }
+            }
 
             // Cam 3 Nấc
             static bool cam3On = false;
-            if (ImGui::Checkbox("📐 Cam 3 Nấc", &cam3On))
+            if (ImGui::Checkbox("Cam 3 Nấc", &cam3On)) {
                 TogglePatch(&cam3nat, cam3On);
+            }
 
             // Show Kỹ Năng
             static bool showUOn = false;
-            if (ImGui::Checkbox("✨ Show Kỹ Năng", &showUOn)) {
+            if (ImGui::Checkbox("Show Kỹ Năng", &showUOn)) {
                 TogglePatch(&showU1, showUOn);
                 TogglePatch(&showU2, showUOn);
                 TogglePatch(&showU3, showUOn);
@@ -275,28 +272,27 @@ void lib_main() {
 
             // Hackmap
             static bool mapOn = false;
-            if (ImGui::Checkbox("🗺️ Hackmap", &mapOn))
+            if (ImGui::Checkbox("Hackmap", &mapOn)) {
                 TogglePatch(&mapPch, mapOn);
+            }
 
             ImGui::End();
         }
     } else if (!il2cppBase) {
-        ImGui::SetNextWindowPos(ImVec2(20, 80), ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Đang chờ...", nullptr)) {
+        if (ImGui::Begin("Đang chờ...", NULL)) {
             ImGui::TextColored(ImVec4(1, 1, 0, 1), "Đang nạp UnityFramework...");
-            ImGui::Text("Chờ vài giây → chạm 3 ngón tay mở menu");
+            ImGui::Text("Mở game rồi chạm 3 ngón tay mở menu");
             ImGui::End();
         }
     }
 
     ImGui::Render();
-    ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cmdBuf, enc);
-    
+    ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(), cmd, enc);
     [enc endEncoding];
-    [cmdBuf presentDrawable:view.currentDrawable];
-    [cmdBuf commit];
+    [cmd presentDrawable:view.currentDrawable];
+    [cmd commit];
 }
 
-- (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {}
+- (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {}
 
 @end
