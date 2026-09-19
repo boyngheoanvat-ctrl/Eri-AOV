@@ -1,7 +1,7 @@
 // ==================================================
-// 1. THƯ VIỆN — ĐẦU TIÊN NHẤT
+// 1. THƯ VIỆN & KHAI BÁO — BỌC extern "C"
 // ==================================================
-#include <stdint.h>   // ✅ SỬA: Thiếu kiểu uint32_t
+#include <stdint.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <stdio.h>
@@ -21,17 +21,24 @@
 #define OBFUSCATE(s) (s)
 #endif
 
-// ✅ SỬA: LOGI dùng %s cho chuỗi OBFUSCATE
 #define LOGI(fmt, ...) NSLog((@"[MOD] " fmt), ##__VA_ARGS__)
 
 #define kWidth   [UIScreen mainScreen].bounds.size.width
 #define kHeight  [UIScreen mainScreen].bounds.size.height
 #define kScale   [UIScreen mainScreen].scale
 
-// ✅ SỬA: Khai báo hàm đúng kiểu
+// ✅ SỬA: Bọc extern "C" để không bị đổi tên hàm
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern uint32_t _dyld_image_count(void);
 extern const char* _dyld_get_image_name(uint32_t image_index);
 extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
+
+#ifdef __cplusplus
+}
+#endif
 
 // ==================================================
 // 2. BIẾN TOÀN CỤC
@@ -171,7 +178,7 @@ void *hack_thread(void *) {
 }
 
 // ==================================================
-// 8. MENU — ✅ SỬA: KẾ THỪA UIView
+// 8. MENU
 // ==================================================
 @interface ImGuiDrawView : UIView <MTKViewDelegate>
 @property (nonatomic, strong) MTKView *mtkView;
@@ -229,7 +236,6 @@ void *hack_thread(void *) {
     pthread_detach(th);
 }
 
-// --- XỬ LÝ CHẠM ---
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint p = [[touches anyObject] locationInView:self];
     if (touches.count >= 3) { MenDeal = !MenDeal; return; }
@@ -265,7 +271,6 @@ void *hack_thread(void *) {
     [self touchesEnded:touches withEvent:event];
 }
 
-// --- RENDER ---
 - (void)drawInMTKView:(MTKView *)view {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(kWidth, kHeight);
