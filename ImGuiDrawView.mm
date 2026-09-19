@@ -33,31 +33,29 @@ extern const struct mach_header* _dyld_get_image_header(uint32_t image_index);
 }
 #endif
 
-// ========== BIẾN TOÀN CỤC — CAM KÉO ==========
+// ========== CẤU TRÚC WIDEVIEW ==========
 struct WideView_t {
     float GetFieldOfView;
     float SetFieldOfView;
     bool Active;
-} WideView = {0, 0, false};
+} WideView = {0.0f, 0.0f, false};
 
 uintptr_t il2cppBase = 0;
 bool MenDeal = false;
 
-// ========== HOOK POINTERS ==========
+// ========== HOOK DECLARE ==========
 typedef float (*fn_GetCam)(void *instance, int type);
 static fn_GetCam old_GetCameraHeightRateValue = nullptr;
 
-typedef void (*fn_OnHeightChanged)(void *instance);
-static fn_OnHeightChanged OnCameraHeightChanged = nullptr;
+typedef void (*fn_Update)(void *instance);
+static fn_Update old_CameraSystemUpdate = nullptr;
+static fn_Update OnCameraHeightChanged = nullptr;
 
-typedef void (*fn_CamUpdate)(void *instance);
-static fn_CamUpdate old_CameraSystemUpdate = nullptr;
-
-// ========== CAM KÉO — LOGIC CHÍNH ==========
+// ========== LOGIC CHÍNH ==========
 float GetCameraHeightRateValue(void *instance, int type) {
     if (instance != NULL) {
         WideView.GetFieldOfView = old_GetCameraHeightRateValue(instance, type);
-        if (WideView.SetFieldOfView != 0) {
+        if (WideView.SetFieldOfView != 0.0f) {
             WideView.Active = false;
             return WideView.SetFieldOfView + WideView.GetFieldOfView;
         }
@@ -165,16 +163,18 @@ static void* hack_thread(void*) {
     
     LOGI(@"✅ UnityFramework: %p", (void*)il2cppBase);
 
-    // Lấy địa chỉ hàm OnCameraHeightChanged
-    OnCameraHeightChanged = (fn_OnHeightChanged)(il2cppBase + 0x107A3BC);
-    LOGI(@"✅ OnHeightChanged: %p", (void*)OnCameraHeightChanged);
+    // Lấy địa chỉ hàm
+    OnCameraHeightChanged = (fn_Update)(il2cppBase + 0x51C46A0);
+    LOGI(@"✅ OnCameraHeightChanged: %p", (void*)OnCameraHeightChanged);
 
-    // Hook Cam Kéo
-    void* pCamFunc  = (void*)(il2cppBase + 0x107A2FC);
-    DobbyHook(pCamFunc, (void*)GetCameraHeightRateValue, (void**)&old_GetCameraHeightRateValue);
-    DobbyHook(pCamFunc, (void*)CameraSystemUpdate,    (void**)&old_CameraSystemUpdate);
-    LOGI(@"✅ Cam Kéo Hook OK");
+    // Hook 2 hàm — 2 địa chỉ RIÊNG
+    void* pUpdate = (void*)(il2cppBase + 0x51C2C04);
+    void* pGetCam = (void*)(il2cppBase + 0x51C4048);
 
+    DobbyHook(pUpdate, (void*)CameraSystemUpdate, (void**)&old_CameraSystemUpdate);
+    DobbyHook(pGetCam, (void*)GetCameraHeightRateValue, (void**)&old_GetCameraHeightRateValue);
+    
+    LOGI(@"✅ Cam Kéo Hook OK — 0x51C2C04 & 0x51C4048");
     return nullptr;
 }
 
@@ -300,7 +300,7 @@ void lib_main() {
                 WideView.SetFieldOfView = val * 0.0362f;
                 WideView.Active = true;
             }
-            ImGui::Text("Giá trị FOV: %.2f", WideView.SetFieldOfView);
+            ImGui::Text("FOV: %.2f | Hệ số: ×%.4f", WideView.SetFieldOfView, WideView.SetFieldOfView / 0.0362f);
 
             // Cam 3 Nấc
             static bool cam3On = false;
